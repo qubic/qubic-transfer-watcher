@@ -158,3 +158,6 @@ Known addresses are labeled using Qubic's bundle.json:
 - `[QX]`, `[QUTIL]` - Smart contracts
 - `$QFT Issuer` - Token issuers
 - `🔥 BURN` - Burn addresses
+
+> [!NOTE]
+> Large parts of this repository are AI generated.
