@@ -1,0 +1,28 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QubicTransferWatcher", "QubicTransferWatcher.csproj", "{CC282ED1-5894-4F0F-AF9E-428D207E9939}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QubicTransferWatcher.Tests", "Tests\QubicTransferWatcher.Tests.csproj", "{8DEDD29D-9F62-4D30-BCFB-64250FE05428}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{CC282ED1-5894-4F0F-AF9E-428D207E9939}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CC282ED1-5894-4F0F-AF9E-428D207E9939}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CC282ED1-5894-4F0F-AF9E-428D207E9939}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CC282ED1-5894-4F0F-AF9E-428D207E9939}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8DEDD29D-9F62-4D30-BCFB-64250FE05428}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8DEDD29D-9F62-4D30-BCFB-64250FE05428}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8DEDD29D-9F62-4D30-BCFB-64250FE05428}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8DEDD29D-9F62-4D30-BCFB-64250FE05428}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

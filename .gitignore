@@ -1,0 +1,63 @@
+# Build results
+bin/
+obj/
+out/
+publish/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Rider
+*.sln.iml
+
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# NuGet
+*.nupkg
+**/packages/*
+!**/packages/build/
+
+# Test results
+TestResults/
+*.trx
+coverage*/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Application data
+data/
+last_logid.txt
+last_tick.txt
+
+# Environment files with secrets
+.env
+.env.local
+.env.*.local
+appsettings.development.json
+appsettings.Development.json
+appsettings.local.json
+
+# Logs
+logs/
+*.log
+
+# Docker
+docker-compose.override.yml

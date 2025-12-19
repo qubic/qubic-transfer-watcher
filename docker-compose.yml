@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  qubic-watcher:
+    image: j0et0m/qubic-transfer-watcher:prod
+    container_name: qubic-transfer-watcher
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
