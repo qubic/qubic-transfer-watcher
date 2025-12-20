@@ -122,15 +122,33 @@ public class EventProcessor
                 tick = tickElement.GetInt64();
             }
 
+            // Extract timestamp (format: "25-12-18 07:20:52")
+            DateTime? timestamp = null;
+            if (messageElement.TryGetProperty("timestamp", out var timestampElement))
+            {
+                var timestampStr = timestampElement.GetString();
+                if (!string.IsNullOrEmpty(timestampStr) &&
+                    DateTime.TryParseExact(timestampStr, "yy-MM-dd HH:mm:ss",
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.AssumeUniversal, out var parsedTimestamp))
+                {
+                    timestamp = DateTime.SpecifyKind(parsedTimestamp, DateTimeKind.Utc);
+                }
+            }
+
             // Get body
             if (!messageElement.TryGetProperty("body", out var bodyElement))
             {
                 return (null, logId, tick);
             }
 
-            // Get transaction ID from logDigest
+            // Get transaction ID - prefer txHash, fallback to logDigest
             string txHash = "";
-            if (messageElement.TryGetProperty("logDigest", out var digestElement))
+            if (messageElement.TryGetProperty("txHash", out var txHashElement))
+            {
+                txHash = txHashElement.GetString() ?? "";
+            }
+            else if (messageElement.TryGetProperty("logDigest", out var digestElement))
             {
                 txHash = digestElement.GetString() ?? "";
             }
@@ -140,12 +158,12 @@ public class EventProcessor
             if (logType == QubicLogTypes.QuTransfer)
             {
                 // QU_TRANSFER: { "from": "...", "to": "...", "amount": ... }
-                transfer = ParseTransferBody(bodyElement, txHash, tick);
+                transfer = ParseTransferBody(bodyElement, txHash, tick, timestamp);
             }
             else if (logType == QubicLogTypes.Burning)
             {
                 // BURNING: { "publicKey": "...", "amount": ..., "contractIndexBurnedFor": ... }
-                transfer = ParseBurnBody(bodyElement, txHash, tick);
+                transfer = ParseBurnBody(bodyElement, txHash, tick, timestamp);
             }
 
             return (transfer, logId, tick);
@@ -157,13 +175,14 @@ public class EventProcessor
         }
     }
 
-    private TransferEvent? ParseTransferBody(JsonElement body, string txHash, long tick)
+    private TransferEvent? ParseTransferBody(JsonElement body, string txHash, long tick, DateTime? timestamp)
     {
         var transfer = new TransferEvent
         {
             TxHash = txHash,
             Tick = tick,
-            IsBurn = false
+            IsBurn = false,
+            Timestamp = timestamp ?? DateTime.UtcNow
         };
 
         // Get from address
@@ -196,14 +215,15 @@ public class EventProcessor
         return transfer;
     }
 
-    private TransferEvent? ParseBurnBody(JsonElement body, string txHash, long tick)
+    private TransferEvent? ParseBurnBody(JsonElement body, string txHash, long tick, DateTime? timestamp)
     {
         var transfer = new TransferEvent
         {
             TxHash = txHash,
             Tick = tick,
             IsBurn = true,
-            ToAddress = AddressLabelService.BurnAddress
+            ToAddress = AddressLabelService.BurnAddress,
+            Timestamp = timestamp ?? DateTime.UtcNow
         };
 
         // Get publicKey (the address that burned)

@@ -22,4 +22,5 @@ public class AppSettings
     public string PriceApiUrl { get; set; } = "https://api.coingecko.com/api/v3/simple/price?ids=qubic-network&vs_currencies=usd";
     public string ExplorerAddressUrl { get; set; } = "https://explorer.qubic.org/network/address/";
     public string ExplorerTickUrl { get; set; } = "https://explorer.qubic.org/network/tick/";
+    public string ExplorerTxUrl { get; set; } = "https://explorer.qubic.org/network/tx/";
 }

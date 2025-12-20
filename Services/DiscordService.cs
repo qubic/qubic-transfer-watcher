@@ -17,6 +17,7 @@ public class DiscordService
     private readonly PriceService _priceService;
     private readonly string _explorerAddressUrl;
     private readonly string _explorerTickUrl;
+    private readonly string _explorerTxUrl;
 
     public DiscordService(
         HttpClient httpClient,
@@ -24,7 +25,8 @@ public class DiscordService
         AddressLabelService addressLabelService,
         PriceService priceService,
         string explorerAddressUrl,
-        string explorerTickUrl)
+        string explorerTickUrl,
+        string explorerTxUrl)
     {
         _httpClient = httpClient;
         _webhookUrl = webhookUrl;
@@ -32,6 +34,7 @@ public class DiscordService
         _priceService = priceService;
         _explorerAddressUrl = explorerAddressUrl;
         _explorerTickUrl = explorerTickUrl;
+        _explorerTxUrl = explorerTxUrl;
     }
 
     public async Task SendTransferNotificationAsync(TransferEvent transfer)
@@ -74,16 +77,31 @@ public class DiscordService
         // Format the message similar to the example
         var qubicFormatted = PriceService.FormatQubicAmount(transfer.Amount);
         var usdFormatted = PriceService.FormatNumber(usdValue);
-        var tickLink = $"[{transfer.Tick}](<{_explorerTickUrl}{transfer.Tick}>)";
+
+        // Format tick with optional timestamp
+        var timestampStr = transfer.Timestamp != DateTime.MinValue
+            ? $" ({transfer.Timestamp:yyyy-MM-dd HH:mm:ss} UTC)"
+            : "";
+        var tickLink = $"[{transfer.Tick}](<{_explorerTickUrl}{transfer.Tick}>){timestampStr}";
+
+        // Add transaction hash link if available
+        var txInfo = "";
+        if (!string.IsNullOrEmpty(transfer.TxHash))
+        {
+            var shortHash = transfer.TxHash.Length > 12
+                ? transfer.TxHash[..12] + "..."
+                : transfer.TxHash;
+            txInfo = $" | TX: [{shortHash}](<{_explorerTxUrl}{transfer.TxHash}>)";
+        }
 
         string content;
         if (transfer.IsBurn)
         {
-            content = $"{emoji} **{qubicFormatted} QUBIC** ({usdFormatted} USD) burned from {fromLink}\nTick: {tickLink}";
+            content = $"{emoji} **{qubicFormatted} QUBIC** ({usdFormatted} USD) burned from {fromLink}\nTick: {tickLink}{txInfo}";
         }
         else
         {
-            content = $"{emoji} **{qubicFormatted} QUBIC** ({usdFormatted} USD) transferred from {fromLink} to {toLink}\nTick: {tickLink}";
+            content = $"{emoji} **{qubicFormatted} QUBIC** ({usdFormatted} USD) transferred from {fromLink} to {toLink}\nTick: {tickLink}{txInfo}";
         }
 
         return content;

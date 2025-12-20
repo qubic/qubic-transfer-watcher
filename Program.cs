@@ -11,9 +11,11 @@ class Program
     static async Task Main(string[] args)
     {
         // Load configuration using .NET Configuration
+        var environment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Production";
         var configuration = new ConfigurationBuilder()
             .SetBasePath(AppContext.BaseDirectory)
             .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+            .AddJsonFile($"appsettings.{environment}.json", optional: true, reloadOnChange: true)
             .AddEnvironmentVariables()
             .Build();
 
@@ -83,7 +85,8 @@ class Program
                 addressLabelService,
                 priceService,
                 settings.ExplorerAddressUrl,
-                settings.ExplorerTickUrl);
+                settings.ExplorerTickUrl,
+                settings.ExplorerTxUrl);
 
             var eventProcessor = new EventProcessor(
                 addressLabelService,

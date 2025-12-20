@@ -160,4 +160,4 @@ Known addresses are labeled using Qubic's bundle.json:
 - `🔥 BURN` - Burn addresses
 
 > [!NOTE]
-> Large parts of this repository are AI generated.
+> Large parts of this repository are AI generated. The Code is not well designed or structured.
