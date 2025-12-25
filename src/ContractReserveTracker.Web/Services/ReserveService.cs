@@ -72,6 +72,15 @@ public class ReserveService
             return null;
         }
 
+        // Determine current epoch from the most recent event
+        var latestBurnEpoch = burns.Any() ? burns.Max(b => b.Epoch) : 0;
+        var latestDeductEpoch = deducts.Any() ? deducts.Max(d => d.Epoch) : 0;
+        var currentEpoch = Math.Max(latestBurnEpoch, latestDeductEpoch);
+
+        // Calculate epoch-specific totals
+        var epochBurned = burns.Where(b => b.Epoch == currentEpoch).Sum(b => b.Amount);
+        var epochDeducted = deducts.Where(d => d.Epoch == currentEpoch).Sum(d => d.DeductedAmount);
+
         // Get last known reserve from most recent deduct event
         var lastDeduct = deducts.OrderByDescending(e => e.Tick).FirstOrDefault();
         var currentReserve = lastDeduct?.RemainingAmount ?? 0;
@@ -100,7 +109,10 @@ public class ReserveService
             TotalDeducted = deducts.Sum(d => d.DeductedAmount),
             BurnCount = burns.Count,
             DeductCount = deducts.Count,
-            LastEventTime = lastEvent
+            LastEventTime = lastEvent,
+            CurrentEpoch = currentEpoch,
+            EpochBurned = epochBurned,
+            EpochDeducted = epochDeducted
         };
     }
 

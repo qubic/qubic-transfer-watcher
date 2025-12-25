@@ -44,4 +44,24 @@ public class ReserveSnapshot
     /// Timestamp of last event
     /// </summary>
     public DateTime? LastEventTime { get; set; }
+
+    /// <summary>
+    /// Current epoch number
+    /// </summary>
+    public int CurrentEpoch { get; set; }
+
+    /// <summary>
+    /// Amount burned in current epoch
+    /// </summary>
+    public long EpochBurned { get; set; }
+
+    /// <summary>
+    /// Amount deducted in current epoch
+    /// </summary>
+    public long EpochDeducted { get; set; }
+
+    /// <summary>
+    /// Net balance for current epoch (burned - deducted)
+    /// </summary>
+    public long EpochBalance => EpochBurned - EpochDeducted;
 }

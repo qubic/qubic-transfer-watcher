@@ -1,0 +1,314 @@
+@page "/contract/{ContractIndex:int}"
+@rendermode InteractiveServer
+@using ContractReserveTracker.Shared.Models
+@using ContractReserveTracker.Shared.Services
+@using ContractReserveTracker.Web.Services
+@using Microsoft.AspNetCore.SignalR.Client
+@inject ReserveService ReserveService
+@inject IContractInfoService ContractInfoService
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>@_contractName - Reserve Tracker</PageTitle>
+
+<div class="container-fluid py-4">
+    <!-- Back Button & Header -->
+    <div class="d-flex align-items-center mb-4">
+        <a href="/" class="btn btn-outline-secondary me-3">
+            <span>&#8592;</span> Back
+        </a>
+        <div>
+            <h1 class="mb-1" style="font-size: 1.75rem; font-weight: 700;">
+                @_contractName
+                <span class="badge bg-info ms-2">#@ContractIndex</span>
+            </h1>
+            <p class="text-muted mb-0">Contract reserve history and events</p>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-danger">
+            <strong>Error:</strong> @_error
+        </div>
+    }
+    else if (_loading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="text-muted mt-3">Loading contract data...</p>
+        </div>
+    }
+    else if (_snapshot == null)
+    {
+        <div class="alert alert-warning">
+            <strong>Not Found:</strong> No data available for contract #@ContractIndex
+        </div>
+    }
+    else
+    {
+        <!-- Stats Overview -->
+        <div class="row g-4 mb-4">
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-label">Current Reserve</div>
+                    <div class="stat-value">@FormatAmount(_snapshot.CurrentReserve)</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-label">Epoch @_snapshot.CurrentEpoch Balance</div>
+                    <div class="stat-value" style="color: @(_snapshot.EpochBalance >= 0 ? "var(--qubic-green)" : "var(--qubic-red)") !important;">
+                        @((_snapshot.EpochBalance >= 0 ? "+" : "") + FormatAmount(_snapshot.EpochBalance))
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-label">Total Burned</div>
+                    <div class="stat-value text-success" style="color: var(--qubic-green) !important;">+@FormatAmount(_snapshot.TotalBurned)</div>
+                    <div class="text-muted small">@_snapshot.BurnCount events</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-label">Total Deducted</div>
+                    <div class="stat-value text-danger" style="color: var(--qubic-red) !important;">-@FormatAmount(_snapshot.TotalDeducted)</div>
+                    <div class="text-muted small">@_snapshot.DeductCount events</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chart Section -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <strong>Burns & Deductions Over Time</strong>
+            </div>
+            <div class="card-body">
+                <canvas id="reserveChart" style="height: 300px; width: 100%;"></canvas>
+            </div>
+        </div>
+
+        <!-- Event Tables -->
+        <div class="row g-4">
+            <!-- Burns -->
+            <div class="col-lg-6">
+                <div class="section-header">
+                    <h4>Burn Events</h4>
+                    <span class="badge bg-success">@_burns.Count events</span>
+                </div>
+                <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Amount</th>
+                                <th>From</th>
+                                <th>Epoch</th>
+                                <th>Time</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (_burns.Count == 0)
+                            {
+                                <tr>
+                                    <td colspan="4" class="text-center text-muted py-4">No burn events</td>
+                                </tr>
+                            }
+                            else
+                            {
+                                @foreach (var burn in _burns)
+                                {
+                                    <tr class="event-row">
+                                        <td class="text-success mono">+@FormatAmount(burn.Amount)</td>
+                                        <td class="text-muted small mono">@TruncateAddress(burn.PublicKey)</td>
+                                        <td><span class="badge bg-info">@burn.Epoch</span></td>
+                                        <td class="text-muted small">@burn.Timestamp.ToString("MMM dd, HH:mm:ss")</td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Deductions -->
+            <div class="col-lg-6">
+                <div class="section-header">
+                    <h4>Deduction Events</h4>
+                    <span class="badge bg-danger">@_deducts.Count events</span>
+                </div>
+                <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Deducted</th>
+                                <th>Remaining</th>
+                                <th>Epoch</th>
+                                <th>Time</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (_deducts.Count == 0)
+                            {
+                                <tr>
+                                    <td colspan="4" class="text-center text-muted py-4">No deduction events</td>
+                                </tr>
+                            }
+                            else
+                            {
+                                @foreach (var deduct in _deducts)
+                                {
+                                    <tr class="event-row">
+                                        <td class="text-danger mono">-@FormatAmount(deduct.DeductedAmount)</td>
+                                        <td class="text-muted mono">@FormatAmount(deduct.RemainingAmount)</td>
+                                        <td><span class="badge bg-info">@deduct.Epoch</span></td>
+                                        <td class="text-muted small">@deduct.Timestamp.ToString("MMM dd, HH:mm:ss")</td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public int ContractIndex { get; set; }
+
+    private ReserveSnapshot? _snapshot;
+    private List<BurnEvent> _burns = new();
+    private List<DeductEvent> _deducts = new();
+    private List<(int Epoch, long TotalBurned, long TotalDeducted)> _epochData = new();
+    private bool _loading = true;
+    private string? _error;
+    private string _contractName = "";
+    private HubConnection? _hubConnection;
+    private bool _chartRendered;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _contractName = ContractInfoService.GetDisplayName(ContractIndex);
+        await LoadDataAsync();
+        await SetupSignalRAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_loading && _snapshot != null && !_chartRendered && _epochData.Count > 0)
+        {
+            _chartRendered = true;
+            await RenderChartAsync();
+        }
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _snapshot = await ReserveService.GetReserveSnapshotAsync(ContractIndex);
+            _burns = await ReserveService.GetRecentBurnEventsAsync(ContractIndex, limit: 100);
+            _deducts = await ReserveService.GetRecentDeductEventsAsync(ContractIndex, limit: 100);
+            _epochData = await ReserveService.GetEpochSummaryAsync(ContractIndex);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task RenderChartAsync()
+    {
+        var labels = _epochData.Select(e => $"Epoch {e.Epoch}").ToArray();
+        var burnData = _epochData.Select(e => e.TotalBurned / 1_000_000.0).ToArray(); // Convert to millions
+        var deductData = _epochData.Select(e => e.TotalDeducted / 1_000_000.0).ToArray();
+
+        await JS.InvokeVoidAsync("renderReserveChart", "reserveChart", labels, burnData, deductData);
+    }
+
+    private async Task SetupSignalRAsync()
+    {
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl(NavigationManager.ToAbsoluteUri("/reserveHub"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        _hubConnection.On<BurnEvent>("OnBurnEvent", async (burnEvent) =>
+        {
+            if (burnEvent.ContractIndex == ContractIndex)
+            {
+                _burns.Insert(0, burnEvent);
+                if (_burns.Count > 100)
+                    _burns.RemoveAt(_burns.Count - 1);
+
+                _snapshot = await ReserveService.GetReserveSnapshotAsync(ContractIndex);
+                _epochData = await ReserveService.GetEpochSummaryAsync(ContractIndex);
+                _chartRendered = false;
+                await InvokeAsync(StateHasChanged);
+            }
+        });
+
+        _hubConnection.On<DeductEvent>("OnDeductEvent", async (deductEvent) =>
+        {
+            if (deductEvent.ContractIndex == ContractIndex)
+            {
+                _deducts.Insert(0, deductEvent);
+                if (_deducts.Count > 100)
+                    _deducts.RemoveAt(_deducts.Count - 1);
+
+                _snapshot = await ReserveService.GetReserveSnapshotAsync(ContractIndex);
+                _epochData = await ReserveService.GetEpochSummaryAsync(ContractIndex);
+                _chartRendered = false;
+                await InvokeAsync(StateHasChanged);
+            }
+        });
+
+        try
+        {
+            await _hubConnection.StartAsync();
+        }
+        catch (Exception)
+        {
+            // SignalR connection failed, continue without real-time updates
+        }
+    }
+
+    private static string FormatAmount(long amount)
+    {
+        if (amount >= 1_000_000_000_000)
+            return $"{amount / 1_000_000_000_000.0:F2}T";
+        if (amount >= 1_000_000_000)
+            return $"{amount / 1_000_000_000.0:F2}B";
+        if (amount >= 1_000_000)
+            return $"{amount / 1_000_000.0:F2}M";
+        if (amount >= 1_000)
+            return $"{amount / 1_000.0:F2}K";
+        return amount.ToString("N0");
+    }
+
+    private static string TruncateAddress(string address)
+    {
+        if (string.IsNullOrEmpty(address) || address.Length <= 12)
+            return address;
+        return $"{address[..6]}...{address[^6..]}";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+}

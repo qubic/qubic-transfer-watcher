@@ -2,6 +2,7 @@
 :root {
     --qubic-bg-primary: #0a0e17;
     --qubic-bg-secondary: #111827;
+    --qubic-bg-tertiary: #0d1420;
     --qubic-bg-card: #1a2234;
     --qubic-bg-card-hover: #232d42;
     --qubic-cyan: #00e5ff;
@@ -371,3 +372,28 @@ h1:focus {
 .status-dot.offline {
     background-color: var(--qubic-red);
 }
+
+/* Clickable card for contract links */
+.card-clickable {
+    cursor: pointer;
+}
+
+.card-clickable:hover {
+    transform: translateY(-2px);
+    border-color: var(--qubic-cyan);
+    box-shadow: 0 8px 32px rgba(0, 229, 255, 0.15);
+}
+
+/* Back button styling */
+.btn-outline-secondary {
+    border-color: var(--qubic-border);
+    color: var(--qubic-text-secondary);
+    background: transparent;
+}
+
+.btn-outline-secondary:hover {
+    border-color: var(--qubic-cyan);
+    color: var(--qubic-cyan);
+    background: transparent;
+}
+

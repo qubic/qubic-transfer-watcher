@@ -90,24 +90,37 @@
             @foreach (var snapshot in _snapshots)
             {
                 <div class="col-lg-4 col-md-6">
-                    <div class="card h-100">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <strong>@snapshot.ContractName</strong>
-                            <span class="badge bg-info">#@snapshot.ContractIndex</span>
-                        </div>
+                    <a href="/contract/@snapshot.ContractIndex" class="text-decoration-none">
+                        <div class="card h-100 card-clickable">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <strong>@snapshot.ContractName</strong>
+                                <span class="badge bg-info">#@snapshot.ContractIndex</span>
+                            </div>
                         <div class="card-body">
                             <div class="mb-3">
                                 <div class="stat-label">Current Reserve</div>
                                 <div class="stat-value" style="font-size: 1.5rem;">@FormatAmount(snapshot.CurrentReserve) <span class="text-muted" style="font-size: 0.875rem;">QU</span></div>
                             </div>
+                            <div class="mb-3 p-2" style="background: var(--qubic-bg-tertiary); border-radius: 6px;">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span class="small text-muted">Epoch @snapshot.CurrentEpoch Balance</span>
+                                    <span class="mono" style="font-size: 1.1rem; color: @(snapshot.EpochBalance >= 0 ? "var(--qubic-green)" : "var(--qubic-red)");">
+                                        @((snapshot.EpochBalance >= 0 ? "+" : "") + FormatAmount(snapshot.EpochBalance))
+                                    </span>
+                                </div>
+                                <div class="d-flex justify-content-between mt-1 small">
+                                    <span class="text-success">+@FormatAmount(snapshot.EpochBurned)</span>
+                                    <span class="text-danger">-@FormatAmount(snapshot.EpochDeducted)</span>
+                                </div>
+                            </div>
                             <div class="row g-2">
                                 <div class="col-6">
-                                    <div class="small text-muted">Burned</div>
+                                    <div class="small text-muted">Total Burned</div>
                                     <div class="text-success mono">+@FormatAmount(snapshot.TotalBurned)</div>
                                     <div class="text-muted small">@snapshot.BurnCount events</div>
                                 </div>
                                 <div class="col-6">
-                                    <div class="small text-muted">Deducted</div>
+                                    <div class="small text-muted">Total Deducted</div>
                                     <div class="text-danger mono">-@FormatAmount(snapshot.TotalDeducted)</div>
                                     <div class="text-muted small">@snapshot.DeductCount events</div>
                                 </div>
@@ -122,6 +135,7 @@
                             }
                         </div>
                     </div>
+                    </a>
                 </div>
             }
         </div>
