@@ -1,12 +1,21 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QubicTransferWatcher", "QubicTransferWatcher.csproj", "{CC282ED1-5894-4F0F-AF9E-428D207E9939}"
+
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QubicTransferWatcher.Tests", "Tests\QubicTransferWatcher.Tests.csproj", "{8DEDD29D-9F62-4D30-BCFB-64250FE05428}"
+
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{B2C3D4E5-F6A7-8901-BCDE-F12345678901}"
 EndProject
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QubicTransferWatcher", "src\QubicTransferWatcher\QubicTransferWatcher.csproj", "{CC282ED1-5894-4F0F-AF9E-428D207E9939}"
+EndProject
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QubicTransferWatcher.Tests", "tests\QubicTransferWatcher.Tests.csproj", "{8DEDD29D-9F62-4D30-BCFB-64250FE05428}"
+EndProject
+
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -24,5 +33,9 @@ Global
 		{8DEDD29D-9F62-4D30-BCFB-64250FE05428}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8DEDD29D-9F62-4D30-BCFB-64250FE05428}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{8DEDD29D-9F62-4D30-BCFB-64250FE05428}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{CC282ED1-5894-4F0F-AF9E-428D207E9939} = {A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
+		{8DEDD29D-9F62-4D30-BCFB-64250FE05428} = {B2C3D4E5-F6A7-8901-BCDE-F12345678901}
 	EndGlobalSection
 EndGlobal
