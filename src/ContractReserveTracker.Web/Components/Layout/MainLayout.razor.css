@@ -2,19 +2,23 @@
     position: relative;
     display: flex;
     flex-direction: column;
+    min-height: 100vh;
+    background-color: var(--qubic-bg-primary);
 }
 
 main {
     flex: 1;
+    background-color: var(--qubic-bg-primary);
 }
 
 .sidebar {
-    background-image: linear-gradient(180deg, rgb(5, 39, 103) 0%, #3a0647 70%);
+    background: linear-gradient(180deg, #0d1520 0%, #0a0e17 100%);
+    border-right: 1px solid var(--qubic-border);
 }
 
 .top-row {
-    background-color: #f7f7f7;
-    border-bottom: 1px solid #d6d5d5;
+    background-color: var(--qubic-bg-secondary);
+    border-bottom: 1px solid var(--qubic-border);
     justify-content: flex-end;
     height: 3.5rem;
     display: flex;
@@ -25,10 +29,12 @@ main {
         white-space: nowrap;
         margin-left: 1.5rem;
         text-decoration: none;
+        color: var(--qubic-text-secondary);
+        font-size: 0.875rem;
     }
 
     .top-row ::deep a:hover, .top-row ::deep .btn-link:hover {
-        text-decoration: underline;
+        color: var(--qubic-cyan);
     }
 
     .top-row ::deep a:first-child {
@@ -77,15 +83,17 @@ main {
 }
 
 #blazor-error-ui {
-    background: lightyellow;
+    background: var(--qubic-bg-card);
+    border-top: 2px solid var(--qubic-red);
     bottom: 0;
-    box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
     display: none;
     left: 0;
     padding: 0.6rem 1.25rem 0.7rem 1.25rem;
     position: fixed;
     width: 100%;
     z-index: 1000;
+    color: var(--qubic-text-primary);
 }
 
     #blazor-error-ui .dismiss {
@@ -93,4 +101,9 @@ main {
         position: absolute;
         right: 0.75rem;
         top: 0.5rem;
+        color: var(--qubic-text-secondary);
+    }
+
+    #blazor-error-ui .dismiss:hover {
+        color: var(--qubic-cyan);
     }
