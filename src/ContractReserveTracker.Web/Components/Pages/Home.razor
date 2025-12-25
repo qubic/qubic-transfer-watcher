@@ -1,0 +1,236 @@
+@page "/"
+@using ContractReserveTracker.Shared.Models
+@using ContractReserveTracker.Shared.Services
+@using ContractReserveTracker.Web.Services
+@using Microsoft.AspNetCore.SignalR.Client
+@inject ReserveService ReserveService
+@inject IContractInfoService ContractInfoService
+@inject NavigationManager NavigationManager
+@implements IAsyncDisposable
+
+<PageTitle>Contract Reserve Tracker</PageTitle>
+
+<div class="container-fluid">
+    <h1 class="mb-4">Contract Reserve Tracker</h1>
+
+    <div class="row">
+        <!-- Contract Overview Cards -->
+        <div class="col-12">
+            <h4>Contract Reserves</h4>
+            @if (_loading)
+            {
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            }
+            else if (_snapshots.Count == 0)
+            {
+                <div class="alert alert-info">
+                    No contract data yet. Waiting for events...
+                </div>
+            }
+            else
+            {
+                <div class="row">
+                    @foreach (var snapshot in _snapshots)
+                    {
+                        <div class="col-md-4 col-lg-3 mb-3">
+                            <div class="card h-100">
+                                <div class="card-header">
+                                    <strong>@snapshot.ContractName</strong>
+                                </div>
+                                <div class="card-body">
+                                    <p class="mb-1">
+                                        <strong>Reserve:</strong>
+                                        <span class="text-primary">@FormatAmount(snapshot.CurrentReserve) QU</span>
+                                    </p>
+                                    <p class="mb-1 small">
+                                        <span class="text-success">+@FormatAmount(snapshot.TotalBurned)</span> burned
+                                        (@snapshot.BurnCount events)
+                                    </p>
+                                    <p class="mb-1 small">
+                                        <span class="text-danger">-@FormatAmount(snapshot.TotalDeducted)</span> deducted
+                                        (@snapshot.DeductCount events)
+                                    </p>
+                                    @if (snapshot.LastEventTime.HasValue)
+                                    {
+                                        <p class="mb-0 small text-muted">
+                                            Last: @snapshot.LastEventTime.Value.ToString("MMM dd HH:mm")
+                                        </p>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="row mt-4">
+        <!-- Recent Burn Events -->
+        <div class="col-md-6">
+            <h4>Recent Burns <span class="badge bg-success">+Reserve</span></h4>
+            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                <table class="table table-sm table-striped">
+                    <thead class="sticky-top bg-white">
+                        <tr>
+                            <th>Contract</th>
+                            <th>Amount</th>
+                            <th>Time</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var burn in _recentBurns)
+                        {
+                            <tr>
+                                <td>@ContractInfoService.GetDisplayName(burn.ContractIndex)</td>
+                                <td class="text-success">+@FormatAmount(burn.Amount)</td>
+                                <td class="small">@burn.Timestamp.ToString("HH:mm:ss")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Recent Deduct Events -->
+        <div class="col-md-6">
+            <h4>Recent Deductions <span class="badge bg-danger">-Reserve</span></h4>
+            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                <table class="table table-sm table-striped">
+                    <thead class="sticky-top bg-white">
+                        <tr>
+                            <th>Contract</th>
+                            <th>Amount</th>
+                            <th>Remaining</th>
+                            <th>Time</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var deduct in _recentDeducts)
+                        {
+                            <tr>
+                                <td>@ContractInfoService.GetDisplayName(deduct.ContractIndex)</td>
+                                <td class="text-danger">-@FormatAmount(deduct.DeductedAmount)</td>
+                                <td class="small">@FormatAmount(deduct.RemainingAmount)</td>
+                                <td class="small">@deduct.Timestamp.ToString("HH:mm:ss")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<ReserveSnapshot> _snapshots = new();
+    private List<BurnEvent> _recentBurns = new();
+    private List<DeductEvent> _recentDeducts = new();
+    private bool _loading = true;
+    private HubConnection? _hubConnection;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+        await SetupSignalRAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        try
+        {
+            _snapshots = await ReserveService.GetAllReserveSnapshotsAsync();
+            _recentBurns = await ReserveService.GetRecentBurnEventsAsync(limit: 20);
+            _recentDeducts = await ReserveService.GetRecentDeductEventsAsync(limit: 20);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SetupSignalRAsync()
+    {
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl(NavigationManager.ToAbsoluteUri("/reserveHub"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        _hubConnection.On<BurnEvent>("OnBurnEvent", async (burnEvent) =>
+        {
+            _recentBurns.Insert(0, burnEvent);
+            if (_recentBurns.Count > 20)
+            {
+                _recentBurns.RemoveAt(_recentBurns.Count - 1);
+            }
+
+            // Update snapshot for this contract
+            await UpdateSnapshotAsync(burnEvent.ContractIndex);
+            await InvokeAsync(StateHasChanged);
+        });
+
+        _hubConnection.On<DeductEvent>("OnDeductEvent", async (deductEvent) =>
+        {
+            _recentDeducts.Insert(0, deductEvent);
+            if (_recentDeducts.Count > 20)
+            {
+                _recentDeducts.RemoveAt(_recentDeducts.Count - 1);
+            }
+
+            // Update snapshot for this contract
+            await UpdateSnapshotAsync(deductEvent.ContractIndex);
+            await InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await _hubConnection.StartAsync();
+        }
+        catch (Exception)
+        {
+            // SignalR connection failed, continue without real-time updates
+        }
+    }
+
+    private async Task UpdateSnapshotAsync(int contractIndex)
+    {
+        var updatedSnapshot = await ReserveService.GetReserveSnapshotAsync(contractIndex);
+        if (updatedSnapshot != null)
+        {
+            var existingIndex = _snapshots.FindIndex(s => s.ContractIndex == contractIndex);
+            if (existingIndex >= 0)
+            {
+                _snapshots[existingIndex] = updatedSnapshot;
+            }
+            else
+            {
+                _snapshots.Add(updatedSnapshot);
+                _snapshots = _snapshots.OrderBy(s => s.ContractIndex).ToList();
+            }
+        }
+    }
+
+    private static string FormatAmount(long amount)
+    {
+        if (amount >= 1_000_000_000_000)
+            return $"{amount / 1_000_000_000_000.0:F2}T";
+        if (amount >= 1_000_000_000)
+            return $"{amount / 1_000_000_000.0:F2}B";
+        if (amount >= 1_000_000)
+            return $"{amount / 1_000_000.0:F2}M";
+        if (amount >= 1_000)
+            return $"{amount / 1_000.0:F2}K";
+        return amount.ToString("N0");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+}
