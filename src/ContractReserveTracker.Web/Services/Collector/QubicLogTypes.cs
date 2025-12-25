@@ -1,4 +1,4 @@
-namespace ContractReserveTracker.Collector.Models;
+namespace ContractReserveTracker.Web.Services.Collector;
 
 /// <summary>
 /// Qubic WebSocket log type constants

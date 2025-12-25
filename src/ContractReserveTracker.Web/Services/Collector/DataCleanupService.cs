@@ -2,11 +2,11 @@ using ContractReserveTracker.Shared.Data;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 
-namespace ContractReserveTracker.Collector.Services;
+namespace ContractReserveTracker.Web.Services.Collector;
 
 public class DataCleanupService
 {
-    private readonly ILogger _log = Log.ForContext<DataCleanupService>();
+    private readonly Serilog.ILogger _log = Log.ForContext<DataCleanupService>();
     private readonly IDbContextFactory<ReserveDbContext> _dbContextFactory;
     private readonly int _epochsToKeep;
     private readonly Timer _cleanupTimer;

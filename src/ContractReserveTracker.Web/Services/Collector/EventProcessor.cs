@@ -1,29 +1,31 @@
 using System.Globalization;
 using System.Text.Json;
-using ContractReserveTracker.Collector.Models;
 using ContractReserveTracker.Shared.Data;
+using ContractReserveTracker.Shared.Hubs;
 using ContractReserveTracker.Shared.Models;
 using ContractReserveTracker.Shared.Services;
+using ContractReserveTracker.Web.Hubs;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 
-namespace ContractReserveTracker.Collector.Services;
+namespace ContractReserveTracker.Web.Services.Collector;
 
 public class EventProcessor
 {
-    private readonly ILogger _log = Log.ForContext<EventProcessor>();
+    private readonly Serilog.ILogger _log = Log.ForContext<EventProcessor>();
     private readonly IDbContextFactory<ReserveDbContext> _dbContextFactory;
     private readonly IContractInfoService _contractInfoService;
-    private readonly SignalRPublisher? _signalRPublisher;
+    private readonly IHubContext<ReserveHub, IReserveHubClient>? _hubContext;
 
     public EventProcessor(
         IDbContextFactory<ReserveDbContext> dbContextFactory,
         IContractInfoService contractInfoService,
-        SignalRPublisher? signalRPublisher = null)
+        IHubContext<ReserveHub, IReserveHubClient>? hubContext = null)
     {
         _dbContextFactory = dbContextFactory;
         _contractInfoService = contractInfoService;
-        _signalRPublisher = signalRPublisher;
+        _hubContext = hubContext;
     }
 
     public async Task<(long logId, long tick, int epoch)> ProcessMessageAsync(string message)
@@ -114,9 +116,9 @@ public class EventProcessor
         db.BurnEvents.Add(burnEvent);
         await db.SaveChangesAsync();
 
-        if (_signalRPublisher != null && !isCatchUp)
+        if (_hubContext != null && !isCatchUp)
         {
-            await _signalRPublisher.PublishBurnEventAsync(burnEvent);
+            await _hubContext.Clients.All.OnBurnEvent(burnEvent);
         }
     }
 
@@ -160,9 +162,9 @@ public class EventProcessor
         db.DeductEvents.Add(deductEvent);
         await db.SaveChangesAsync();
 
-        if (_signalRPublisher != null && !isCatchUp)
+        if (_hubContext != null && !isCatchUp)
         {
-            await _signalRPublisher.PublishDeductEventAsync(deductEvent);
+            await _hubContext.Clients.All.OnDeductEvent(deductEvent);
         }
     }
 

@@ -1,20 +1,19 @@
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
-using ContractReserveTracker.Collector.Models;
 using ContractReserveTracker.Shared.Data;
 using ContractReserveTracker.Shared.Models;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 
-namespace ContractReserveTracker.Collector.Services;
+namespace ContractReserveTracker.Web.Services.Collector;
 
 /// <summary>
 /// WebSocket client for connecting to Qubic log stream with multi-URL failover support
 /// </summary>
 public class QubicWebSocketClient : IDisposable
 {
-    private readonly ILogger _log = Log.ForContext<QubicWebSocketClient>();
+    private readonly Serilog.ILogger _log = Log.ForContext<QubicWebSocketClient>();
     private readonly List<string> _webSocketUrls;
     private readonly EventProcessor _eventProcessor;
     private readonly IDbContextFactory<ReserveDbContext> _dbContextFactory;
