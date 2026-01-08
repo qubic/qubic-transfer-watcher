@@ -107,8 +107,8 @@ public class EventProcessor
 
         await using var db = await _dbContextFactory.CreateDbContextAsync();
 
-        // Check if already exists (by LogId)
-        if (await db.BurnEvents.AnyAsync(e => e.LogId == burnEvent.LogId))
+        // Check if already exists (by Epoch + LogId, since LogId is only unique within an epoch)
+        if (await db.BurnEvents.AnyAsync(e => e.Epoch == burnEvent.Epoch && e.LogId == burnEvent.LogId))
         {
             return;
         }
@@ -153,8 +153,8 @@ public class EventProcessor
 
         await using var db = await _dbContextFactory.CreateDbContextAsync();
 
-        // Check if already exists (by LogId)
-        if (await db.DeductEvents.AnyAsync(e => e.LogId == deductEvent.LogId))
+        // Check if already exists (by Epoch + LogId, since LogId is only unique within an epoch)
+        if (await db.DeductEvents.AnyAsync(e => e.Epoch == deductEvent.Epoch && e.LogId == deductEvent.LogId))
         {
             return;
         }

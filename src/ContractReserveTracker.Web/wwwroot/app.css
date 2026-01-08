@@ -10,6 +10,7 @@
     --qubic-cyan-glow: rgba(0, 229, 255, 0.3);
     --qubic-green: #00ff88;
     --qubic-red: #ff4466;
+    --qubic-orange: rgb(255, 167, 36);
     --qubic-text-primary: #ffffff;
     --qubic-text-secondary: #8892a6;
     --qubic-text-muted: #5a6478;
@@ -395,5 +396,84 @@ h1:focus {
     border-color: var(--qubic-cyan);
     color: var(--qubic-cyan);
     background: transparent;
+}
+
+/* Disclaimer banner */
+.disclaimer-banner {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.875rem 1.25rem;
+    margin: 1rem 1rem 1rem 1rem;
+    background-color: rgba(255, 68, 102, 0.1);
+    border: 1px solid var(--qubic-orange);
+    border-radius: 6px;
+    color: var(--qubic-text-secondary);
+    font-size: 0.875rem;
+    line-height: 1.5;
+}
+
+.disclaimer-banner .warning-icon {
+    color: var(--qubic-orange);
+    font-size: 1.25rem;
+    flex-shrink: 0;
+}
+
+.disclaimer-banner strong {
+    color: var(--qubic-orange);
+}
+
+/* Site footer */
+.site-footer {
+    margin-top: 3rem;
+    padding: 2rem 1.5rem;
+    text-align: center;
+    border-top: 1px solid var(--qubic-border);
+}
+
+.site-footer .disclaimer-text {
+    color: var(--qubic-text-muted);
+    font-size: 0.85rem;
+    line-height: 1.6;
+    margin-bottom: 1rem;
+    max-width: 800px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.site-footer .disclaimer-text strong {
+    color: var(--qubic-text-secondary);
+}
+
+.site-footer .footer-links {
+    margin-bottom: 1rem;
+}
+
+.site-footer .footer-links a {
+    color: var(--qubic-cyan);
+    text-decoration: none;
+    font-size: 0.875rem;
+}
+
+.site-footer .footer-links a:hover {
+    text-decoration: underline;
+}
+
+.site-footer .footer-links .separator {
+    color: var(--qubic-text-muted);
+    margin: 0 0.75rem;
+}
+
+.site-footer .copyright {
+    color: var(--qubic-text-muted);
+    font-size: 0.8rem;
+    margin: 0;
+}
+
+.site-footer .version {
+    color: var(--qubic-cyan);
+    font-size: 0.75rem;
+    margin-left: 0.5rem;
 }
 

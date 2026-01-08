@@ -20,9 +20,9 @@ public class ReserveDbContext : DbContext
         // BurnEvent indexes
         modelBuilder.Entity<BurnEvent>(entity =>
         {
-            entity.HasIndex(e => e.LogId).IsUnique();
+            // LogId is only unique within an epoch
+            entity.HasIndex(e => new { e.Epoch, e.LogId }).IsUnique();
             entity.HasIndex(e => e.ContractIndex);
-            entity.HasIndex(e => e.Epoch);
             entity.HasIndex(e => e.Tick);
             entity.HasIndex(e => e.Timestamp);
         });
@@ -30,9 +30,9 @@ public class ReserveDbContext : DbContext
         // DeductEvent indexes
         modelBuilder.Entity<DeductEvent>(entity =>
         {
-            entity.HasIndex(e => e.LogId).IsUnique();
+            // LogId is only unique within an epoch
+            entity.HasIndex(e => new { e.Epoch, e.LogId }).IsUnique();
             entity.HasIndex(e => e.ContractIndex);
-            entity.HasIndex(e => e.Epoch);
             entity.HasIndex(e => e.Tick);
             entity.HasIndex(e => e.Timestamp);
         });

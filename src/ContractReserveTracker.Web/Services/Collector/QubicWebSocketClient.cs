@@ -408,7 +408,7 @@ public class QubicWebSocketClient : IDisposable
         };
 
         string json;
-        if (_lastProcessedLogId >= 0)
+        if (_lastProcessedLogId > 0)
         {
             var subscribeMessage = new
             {
@@ -425,7 +425,8 @@ public class QubicWebSocketClient : IDisposable
             var subscribeMessage = new
             {
                 action = "subscribe",
-                subscriptions
+                subscriptions,
+                lastLogId = 0 // set to zero to start fresh
             };
             json = JsonSerializer.Serialize(subscribeMessage);
             _log.Information("Sending subscription (no lastLogId - starting fresh)...");

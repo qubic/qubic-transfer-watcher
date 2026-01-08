@@ -9,3 +9,21 @@ services:
       - .env
     volumes:
       - ./data:/app/data
+
+  reserve-tracker:
+    build:
+      context: .
+      dockerfile: src/ContractReserveTracker.Web/Dockerfile
+    container_name: reserve-tracker
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__DefaultConnection=Data Source=/app/data/reserves.db
+      - Collector__WebSocketUrls__0=wss://bob.qubic.li/ws/logs
+      - Collector__ReconnectDelaySeconds=5
+      - Collector__MaxTickDelay=10
+      - Collector__EpochsToKeep=3
+    restart: unless-stopped
