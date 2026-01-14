@@ -15,7 +15,6 @@ public class QubicWebSocketClient : IDisposable
     private readonly List<string> _webSocketUrls;
     private readonly EventProcessor _eventProcessor;
     private readonly int _reconnectDelaySeconds;
-    private readonly int _maxTickDelay;
     private readonly string _logIdFilePath;
     private readonly string _tickFilePath;
     private ClientWebSocket? _webSocket;
@@ -25,6 +24,7 @@ public class QubicWebSocketClient : IDisposable
     private long _lastProcessedLogId = -1;
     private long _lastSeenTick;
     private int _currentUrlIndex;
+    private int _rpcRequestId = 1;
 
     public event EventHandler<string>? MessageReceived;
     public event EventHandler<Exception>? ErrorOccurred;
@@ -35,7 +35,6 @@ public class QubicWebSocketClient : IDisposable
         List<string> webSocketUrls,
         EventProcessor eventProcessor,
         int reconnectDelaySeconds = 5,
-        int maxTickDelay = 10,
         string? logIdFilePath = null)
     {
         if (webSocketUrls == null || webSocketUrls.Count == 0)
@@ -44,7 +43,6 @@ public class QubicWebSocketClient : IDisposable
         _webSocketUrls = webSocketUrls;
         _eventProcessor = eventProcessor;
         _reconnectDelaySeconds = reconnectDelaySeconds;
-        _maxTickDelay = maxTickDelay;
         _currentUrlIndex = 0;
 
         var dataDir = Path.Combine(AppContext.BaseDirectory, "data");
@@ -162,13 +160,6 @@ public class QubicWebSocketClient : IDisposable
             {
                 break;
             }
-            catch (ServerBehindException ex)
-            {
-                _log.Warning("Server {Url} is behind: {Message}", CurrentUrl, ex.Message);
-                SwitchToNextUrl();
-                _log.Information("Reconnecting to {Url} in {DelaySeconds} seconds...", CurrentUrl, _reconnectDelaySeconds);
-                await Task.Delay(TimeSpan.FromSeconds(_reconnectDelaySeconds), _cts.Token);
-            }
             catch (Exception ex)
             {
                 _log.Error(ex, "WebSocket error on {Url}", CurrentUrl);
@@ -209,14 +200,6 @@ public class QubicWebSocketClient : IDisposable
         }
 
         _log.Information("Connected to WebSocket!");
-
-        // Wait for and validate welcome message
-        var welcomeValidated = await WaitForWelcomeMessageAsync(cancellationToken);
-        if (!welcomeValidated)
-        {
-            throw new ServerBehindException("Server failed welcome validation");
-        }
-
         Connected?.Invoke(this, EventArgs.Empty);
 
         // Send subscription message
@@ -263,143 +246,35 @@ public class QubicWebSocketClient : IDisposable
         }
     }
 
-    private async Task<bool> WaitForWelcomeMessageAsync(CancellationToken cancellationToken)
-    {
-        var buffer = new byte[4096];
-        var messageBuilder = new StringBuilder();
-
-        try
-        {
-            // Set a timeout for receiving the welcome message
-            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
-
-            while (_webSocket!.State == WebSocketState.Open)
-            {
-                var result = await _webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), linkedCts.Token);
-
-                if (result.MessageType == WebSocketMessageType.Close)
-                {
-                    _log.Warning("Server closed connection before sending welcome message");
-                    return false;
-                }
-
-                var messageChunk = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                messageBuilder.Append(messageChunk);
-
-                if (result.EndOfMessage)
-                {
-                    var message = messageBuilder.ToString();
-                    return ValidateWelcomeMessage(message);
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            _log.Warning("Timeout waiting for welcome message from {Url}", CurrentUrl);
-            return false;
-        }
-
-        return false;
-    }
-
-    private bool ValidateWelcomeMessage(string message)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(message);
-            var root = doc.RootElement;
-
-            // Check if this is a welcome message
-            if (!root.TryGetProperty("type", out var typeElement) ||
-                typeElement.GetString() != "welcome")
-            {
-                _log.Warning("First message is not a welcome message: {Message}", message);
-                return false;
-            }
-
-            // Extract currentVerifiedTick
-            if (!root.TryGetProperty("currentVerifiedTick", out var tickElement))
-            {
-                _log.Warning("Welcome message missing currentVerifiedTick");
-                return false;
-            }
-
-            var serverTick = tickElement.GetInt64();
-
-            // Extract epoch for logging
-            var epoch = 0;
-            if (root.TryGetProperty("currentEpoch", out var epochElement))
-            {
-                epoch = epochElement.GetInt32();
-            }
-
-            _log.Information("Server {Url}: epoch={Epoch}, currentVerifiedTick={ServerTick}",
-                CurrentUrl, epoch, serverTick);
-
-            // If we have a known latest tick, check if server is too far behind
-            if (_lastSeenTick > 0)
-            {
-                var tickDifference = _lastSeenTick - serverTick;
-                if (tickDifference > _maxTickDelay)
-                {
-                    _log.Warning("Server {Url} is {Difference} ticks behind (max allowed: {MaxDelay})",
-                        CurrentUrl, tickDifference, _maxTickDelay);
-                    throw new ServerBehindException(
-                        $"Server tick {serverTick} is {tickDifference} behind latest {_lastSeenTick}");
-                }
-            }
-
-            // Update latest known tick if server has a higher tick
-            if (serverTick > _lastSeenTick)
-            {
-                _lastSeenTick = serverTick;
-            }
-
-            return true;
-        }
-        catch (ServerBehindException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _log.Error(ex, "Error parsing welcome message: {Message}", message);
-            return false;
-        }
-    }
-
     private async Task SendSubscriptionAsync(CancellationToken cancellationToken)
     {
-        var subscriptions = new[]
+        // JSON-RPC 2.0 subscription format
+        // Subscribe to logType 0 (QuTransfer) and 8 (Burning)
+        var subscriptionParams = new Dictionary<string, object>
         {
-            new { scIndex = 0, logType = QubicLogTypes.QuTransfer },   // Transfer events
-            new { scIndex = 0, logType = QubicLogTypes.Burning }       // Burn events
+            ["logType"] = new[] { QubicLogTypes.QuTransfer, QubicLogTypes.Burning }
         };
 
-        string json;
+        // Add startLogId if we have a previous position to resume from
         if (_lastProcessedLogId >= 0)
         {
-            var subscribeMessage = new
-            {
-                action = "subscribe",
-                subscriptions,
-                lastLogId = _lastProcessedLogId
-            };
-            json = JsonSerializer.Serialize(subscribeMessage);
-            _log.Information("Sending subscription (lastLogId: {LastLogId})...", _lastProcessedLogId);
+            subscriptionParams["startLogId"] = _lastProcessedLogId;
+            _log.Information("Sending JSON-RPC subscription (startLogId: {LastLogId})...", _lastProcessedLogId);
         }
         else
         {
-            var subscribeMessage = new
-            {
-                action = "subscribe",
-                subscriptions
-            };
-            json = JsonSerializer.Serialize(subscribeMessage);
-            _log.Information("Sending subscription (no lastLogId - starting fresh)...");
+            _log.Information("Sending JSON-RPC subscription (no startLogId - starting fresh)...");
         }
 
+        var subscribeMessage = new
+        {
+            jsonrpc = "2.0",
+            method = "qubic_subscribe",
+            @params = new object[] { "logs", subscriptionParams },
+            id = _rpcRequestId++
+        };
+
+        var json = JsonSerializer.Serialize(subscribeMessage);
         var bytes = Encoding.UTF8.GetBytes(json);
 
         await _webSocket!.SendAsync(
@@ -408,7 +283,7 @@ public class QubicWebSocketClient : IDisposable
             true,
             cancellationToken);
 
-        _log.Information("Subscription sent successfully");
+        _log.Information("JSON-RPC subscription sent successfully");
     }
 
     private async Task ProcessMessageAsync(string message)
@@ -464,12 +339,4 @@ public class QubicWebSocketClient : IDisposable
         _cts?.Dispose();
         _webSocket?.Dispose();
     }
-}
-
-/// <summary>
-/// Exception thrown when a server is too far behind the latest known tick
-/// </summary>
-public class ServerBehindException : Exception
-{
-    public ServerBehindException(string message) : base(message) { }
 }

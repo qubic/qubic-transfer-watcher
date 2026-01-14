@@ -89,42 +89,70 @@ public class EventProcessor
             long logId = 0;
             long tick = 0;
 
-            // Check if this is a "log" type message from the Qubic WebSocket
-            if (!root.TryGetProperty("type", out var typeElement) ||
-                typeElement.GetString() != "log")
+            // Check if this is a JSON-RPC 2.0 message
+            if (!root.TryGetProperty("jsonrpc", out var jsonRpcElement) ||
+                jsonRpcElement.GetString() != "2.0")
             {
                 return (null, logId, tick);
             }
 
-            // Extract logId from root
-            if (root.TryGetProperty("logId", out var logIdElement))
+            // Handle subscription confirmation (has "id" and "result")
+            if (root.TryGetProperty("id", out _) && root.TryGetProperty("result", out var resultElement))
+            {
+                // Result can be a string (subscription ID) or an object
+                if (resultElement.ValueKind == JsonValueKind.String)
+                {
+                    _log.Information("Subscription confirmed with ID: {SubscriptionId}", resultElement.GetString());
+                }
+                else if (resultElement.TryGetProperty("subscription", out var subElement))
+                {
+                    _log.Information("Subscription confirmed with ID: {SubscriptionId}", subElement.GetString());
+                }
+                return (null, logId, tick);
+            }
+
+            // Handle subscription notifications (method = "qubic_subscription")
+            if (!root.TryGetProperty("method", out var methodElement) ||
+                methodElement.GetString() != "qubic_subscription")
+            {
+                return (null, logId, tick);
+            }
+
+            // Get params object
+            if (!root.TryGetProperty("params", out var paramsElement))
+            {
+                return (null, logId, tick);
+            }
+
+            // Get the result (single log entry, not array)
+            if (!paramsElement.TryGetProperty("result", out var logEntry))
+            {
+                return (null, logId, tick);
+            }
+
+            // Extract logId from log entry
+            if (logEntry.TryGetProperty("logId", out var logIdElement))
             {
                 logId = logIdElement.GetInt64();
             }
 
-            // Get the logType to determine if this is a transfer or burn
-            if (!root.TryGetProperty("logType", out var logTypeElement))
+            // Get the log type (field is "type" in new format)
+            if (!logEntry.TryGetProperty("type", out var logTypeElement))
             {
                 return (null, logId, tick);
             }
 
             var logType = logTypeElement.GetInt32();
 
-            // Get the message object
-            if (!root.TryGetProperty("message", out var messageElement))
-            {
-                return (null, logId, tick);
-            }
-
             // Extract tick
-            if (messageElement.TryGetProperty("tick", out var tickElement))
+            if (logEntry.TryGetProperty("tick", out var tickElement))
             {
                 tick = tickElement.GetInt64();
             }
 
             // Extract timestamp (format: "25-12-18 07:20:52")
             DateTime? timestamp = null;
-            if (messageElement.TryGetProperty("timestamp", out var timestampElement))
+            if (logEntry.TryGetProperty("timestamp", out var timestampElement))
             {
                 var timestampStr = timestampElement.GetString();
                 if (!string.IsNullOrEmpty(timestampStr) &&
@@ -136,19 +164,19 @@ public class EventProcessor
                 }
             }
 
-            // Get body
-            if (!messageElement.TryGetProperty("body", out var bodyElement))
+            // Get body - in new format it's at root level of log entry
+            if (!logEntry.TryGetProperty("body", out var bodyElement))
             {
                 return (null, logId, tick);
             }
 
             // Get transaction ID - prefer txHash, fallback to logDigest
             string txHash = "";
-            if (messageElement.TryGetProperty("txHash", out var txHashElement))
+            if (logEntry.TryGetProperty("txHash", out var txHashElement))
             {
                 txHash = txHashElement.GetString() ?? "";
             }
-            else if (messageElement.TryGetProperty("logDigest", out var digestElement))
+            else if (logEntry.TryGetProperty("logDigest", out var digestElement))
             {
                 txHash = digestElement.GetString() ?? "";
             }

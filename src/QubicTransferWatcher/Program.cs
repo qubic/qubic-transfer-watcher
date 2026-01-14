@@ -96,8 +96,7 @@ class Program
             var webSocketClient = new QubicWebSocketClient(
                 settings.WebSocketUrls,
                 eventProcessor,
-                settings.ReconnectDelaySeconds,
-                settings.MaxTickDelay);
+                settings.ReconnectDelaySeconds);
 
             // Setup graceful shutdown
             var cts = new CancellationTokenSource();
