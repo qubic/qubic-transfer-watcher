@@ -40,7 +40,6 @@ public class CollectorHostedService : BackgroundService
         }
 
         var reconnectDelaySeconds = _configuration.GetValue("Collector:ReconnectDelaySeconds", 5);
-        var maxTickDelay = _configuration.GetValue("Collector:MaxTickDelay", 10);
         var epochsToKeep = _configuration.GetValue("Collector:EpochsToKeep", 3);
 
         _log.Information("========================================");
@@ -61,8 +60,7 @@ public class CollectorHostedService : BackgroundService
             webSocketUrls,
             eventProcessor,
             _dbContextFactory,
-            reconnectDelaySeconds,
-            maxTickDelay);
+            reconnectDelaySeconds);
 
         try
         {

@@ -255,6 +255,9 @@
         _error = null;
         try
         {
+            // Get latest epoch first
+            _currentEpoch = await ReserveService.GetLatestEpochAsync();
+
             _snapshots = await ReserveService.GetAllReserveSnapshotsAsync();
             _recentBurns = await ReserveService.GetRecentBurnEventsAsync(limit: 20);
             _recentDeducts = await ReserveService.GetRecentDeductEventsAsync(limit: 20);
@@ -263,12 +266,6 @@
             _totalBurned = _snapshots.Sum(s => s.TotalBurned);
             _totalDeducted = _snapshots.Sum(s => s.TotalDeducted);
             _netChange = _totalBurned - _totalDeducted;
-
-            // Get current epoch from recent events
-            if (_recentBurns.Any())
-                _currentEpoch = _recentBurns.Max(b => b.Epoch);
-            else if (_recentDeducts.Any())
-                _currentEpoch = _recentDeducts.Max(d => d.Epoch);
         }
         catch (Exception ex)
         {
@@ -333,7 +330,8 @@
 
     private async Task UpdateSnapshotAsync(int contractIndex)
     {
-        var updatedSnapshot = await ReserveService.GetReserveSnapshotAsync(contractIndex);
+        // Pass current epoch to ensure epoch balance is calculated for the latest epoch
+        var updatedSnapshot = await ReserveService.GetReserveSnapshotAsync(contractIndex, _currentEpoch);
         if (updatedSnapshot != null)
         {
             var existingIndex = _snapshots.FindIndex(s => s.ContractIndex == contractIndex);

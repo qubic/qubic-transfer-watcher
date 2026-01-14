@@ -9,7 +9,8 @@ using Serilog;
 namespace ContractReserveTracker.Web.Services.Collector;
 
 /// <summary>
-/// WebSocket client for connecting to Qubic log stream with multi-URL failover support
+/// WebSocket client for connecting to Qubic Bob RPC log stream with multi-URL failover support.
+/// Uses the new JSON-RPC 2.0 interface with qubic_subscribe method.
 /// </summary>
 public class QubicWebSocketClient : IDisposable
 {
@@ -18,7 +19,6 @@ public class QubicWebSocketClient : IDisposable
     private readonly EventProcessor _eventProcessor;
     private readonly IDbContextFactory<ReserveDbContext> _dbContextFactory;
     private readonly int _reconnectDelaySeconds;
-    private readonly int _maxTickDelay;
     private ClientWebSocket? _webSocket;
     private CancellationTokenSource? _cts;
     private bool _isRunning;
@@ -27,6 +27,8 @@ public class QubicWebSocketClient : IDisposable
     private long _lastSeenTick;
     private int _currentEpoch;
     private int _currentUrlIndex;
+    private string? _subscriptionId;
+    private int _rpcRequestId = 1;
 
     public event EventHandler<string>? MessageReceived;
     public event EventHandler<Exception>? ErrorOccurred;
@@ -37,8 +39,7 @@ public class QubicWebSocketClient : IDisposable
         List<string> webSocketUrls,
         EventProcessor eventProcessor,
         IDbContextFactory<ReserveDbContext> dbContextFactory,
-        int reconnectDelaySeconds = 5,
-        int maxTickDelay = 10)
+        int reconnectDelaySeconds = 5)
     {
         if (webSocketUrls == null || webSocketUrls.Count == 0)
             throw new ArgumentException("At least one WebSocket URL is required", nameof(webSocketUrls));
@@ -47,7 +48,6 @@ public class QubicWebSocketClient : IDisposable
         _eventProcessor = eventProcessor;
         _dbContextFactory = dbContextFactory;
         _reconnectDelaySeconds = reconnectDelaySeconds;
-        _maxTickDelay = maxTickDelay;
         _currentUrlIndex = 0;
     }
 
@@ -58,6 +58,37 @@ public class QubicWebSocketClient : IDisposable
         var previousUrl = CurrentUrl;
         _currentUrlIndex = (_currentUrlIndex + 1) % _webSocketUrls.Count;
         _log.Warning("Switching from {PreviousUrl} to {NextUrl}", previousUrl, CurrentUrl);
+    }
+
+    private async Task LoadLatestEpochFromDbAsync()
+    {
+        try
+        {
+            await using var db = await _dbContextFactory.CreateDbContextAsync();
+
+            // Find the latest epoch from LogProgress table
+            var latestProgress = await db.LogProgress
+                .OrderByDescending(p => p.Epoch)
+                .FirstOrDefaultAsync();
+
+            if (latestProgress != null)
+            {
+                _currentEpoch = latestProgress.Epoch;
+                _lastProcessedLogId = latestProgress.LastLogId;
+                _lastSeenTick = latestProgress.LastTick;
+                _log.Information("Loaded latest progress: epoch={Epoch}, lastLogId={LastLogId}, lastTick={LastTick}",
+                    _currentEpoch, _lastProcessedLogId, _lastSeenTick);
+            }
+            else
+            {
+                _log.Information("No previous progress found, starting fresh");
+                _lastProcessedLogId = -1;
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Error(ex, "Error loading latest epoch from database");
+        }
     }
 
     private async Task LoadProgressFromDbAsync(int epoch)
@@ -231,10 +262,11 @@ public class QubicWebSocketClient : IDisposable
 
         _log.Information("Connected to WebSocket!");
 
-        var welcomeValidated = await WaitForWelcomeMessageAsync(cancellationToken);
-        if (!welcomeValidated)
+        // Load progress from database if we have previous data
+        // On fresh start, _currentEpoch stays 0 and will be set from incoming log entries
+        if (_currentEpoch <= 0)
         {
-            throw new ServerBehindException("Server failed welcome validation");
+            await LoadLatestEpochFromDbAsync();
         }
 
         Connected?.Invoke(this, EventArgs.Empty);
@@ -293,7 +325,46 @@ public class QubicWebSocketClient : IDisposable
         await SaveProgressToDbAsync();
     }
 
-    private async Task<bool> WaitForWelcomeMessageAsync(CancellationToken cancellationToken)
+    private async Task SendSubscriptionAsync(CancellationToken cancellationToken)
+    {
+        // JSON-RPC 2.0 format for qubic_subscribe to logs
+        // Log types: 8 = BURNING, 13 = CONTRACT_RESERVE_DEDUCTION
+        // startLogId: resume from last processed log ID (0 = start from beginning)
+        var startLogId = _lastProcessedLogId > 0 ? _lastProcessedLogId : 0;
+
+        var subscribeMessage = new
+        {
+            jsonrpc = "2.0",
+            method = "qubic_subscribe",
+            @params = new object[]
+            {
+                "logs",
+                new
+                {
+                    logType = new[] { QubicLogTypes.Burning, QubicLogTypes.ContractReserveDeduction },
+                    startLogId
+                }
+            },
+            id = _rpcRequestId++
+        };
+
+        var json = JsonSerializer.Serialize(subscribeMessage);
+
+        _log.Information("Sending JSON-RPC subscription for log types [8, 13] with startLogId={StartLogId} (epoch: {Epoch})...",
+            startLogId, _currentEpoch);
+
+        var bytes = Encoding.UTF8.GetBytes(json);
+        await _webSocket!.SendAsync(
+            new ArraySegment<byte>(bytes),
+            WebSocketMessageType.Text,
+            true,
+            cancellationToken);
+
+        // Wait for subscription confirmation
+        await WaitForSubscriptionConfirmationAsync(cancellationToken);
+    }
+
+    private async Task WaitForSubscriptionConfirmationAsync(CancellationToken cancellationToken)
     {
         var buffer = new byte[4096];
         var messageBuilder = new StringBuilder();
@@ -309,8 +380,7 @@ public class QubicWebSocketClient : IDisposable
 
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
-                    _log.Warning("Server closed connection before sending welcome message");
-                    return false;
+                    throw new Exception("Server closed connection during subscription");
                 }
 
                 var messageChunk = Encoding.UTF8.GetString(buffer, 0, result.Count);
@@ -319,127 +389,43 @@ public class QubicWebSocketClient : IDisposable
                 if (result.EndOfMessage)
                 {
                     var message = messageBuilder.ToString();
-                    return await ValidateWelcomeMessageAsync(message);
+                    using var doc = JsonDocument.Parse(message);
+                    var root = doc.RootElement;
+
+                    // Check for subscription confirmation: {"jsonrpc":"2.0","result":"qubic_sub_0","id":1}
+                    if (root.TryGetProperty("result", out var resultElement) && resultElement.ValueKind == JsonValueKind.String)
+                    {
+                        _subscriptionId = resultElement.GetString();
+                        _log.Information("Subscription confirmed: {SubscriptionId}", _subscriptionId);
+                        return;
+                    }
+
+                    // Check for error response
+                    if (root.TryGetProperty("error", out var errorElement))
+                    {
+                        var errorMsg = errorElement.TryGetProperty("message", out var msgElement)
+                            ? msgElement.GetString()
+                            : "Unknown error";
+                        throw new Exception($"Subscription failed: {errorMsg}");
+                    }
+
+                    // If it's already a notification, process it and continue
+                    if (root.TryGetProperty("method", out var methodElement) &&
+                        methodElement.GetString() == "qubic_subscription")
+                    {
+                        _log.Debug("Received notification before confirmation, processing...");
+                        await ProcessMessageAsync(message);
+                    }
+
+                    messageBuilder.Clear();
                 }
             }
         }
         catch (OperationCanceledException)
         {
-            _log.Warning("Timeout waiting for welcome message from {Url}", CurrentUrl);
-            return false;
+            _log.Warning("Timeout waiting for subscription confirmation");
+            throw new Exception("Subscription confirmation timeout");
         }
-
-        return false;
-    }
-
-    private async Task<bool> ValidateWelcomeMessageAsync(string message)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(message);
-            var root = doc.RootElement;
-
-            if (!root.TryGetProperty("type", out var typeElement) ||
-                typeElement.GetString() != "welcome")
-            {
-                _log.Warning("First message is not a welcome message: {Message}", message);
-                return false;
-            }
-
-            if (!root.TryGetProperty("currentVerifiedTick", out var tickElement))
-            {
-                _log.Warning("Welcome message missing currentVerifiedTick");
-                return false;
-            }
-
-            var serverTick = tickElement.GetInt64();
-            var epoch = 0;
-            if (root.TryGetProperty("currentEpoch", out var epochElement))
-            {
-                epoch = epochElement.GetInt32();
-            }
-
-            _log.Information("Server {Url}: epoch={Epoch}, currentVerifiedTick={ServerTick}",
-                CurrentUrl, epoch, serverTick);
-
-            // Load progress for this epoch from database
-            if (epoch > 0 && epoch != _currentEpoch)
-            {
-                _currentEpoch = epoch;
-                await LoadProgressFromDbAsync(epoch);
-            }
-
-            if (_lastSeenTick > 0)
-            {
-                var tickDifference = _lastSeenTick - serverTick;
-                if (tickDifference > _maxTickDelay)
-                {
-                    _log.Warning("Server {Url} is {Difference} ticks behind (max allowed: {MaxDelay})",
-                        CurrentUrl, tickDifference, _maxTickDelay);
-                    throw new ServerBehindException(
-                        $"Server tick {serverTick} is {tickDifference} behind latest {_lastSeenTick}");
-                }
-            }
-
-            if (serverTick > _lastSeenTick)
-            {
-                _lastSeenTick = serverTick;
-            }
-
-            return true;
-        }
-        catch (ServerBehindException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _log.Error(ex, "Error parsing welcome message: {Message}", message);
-            return false;
-        }
-    }
-
-    private async Task SendSubscriptionAsync(CancellationToken cancellationToken)
-    {
-        var subscriptions = new[]
-        {
-            new { scIndex = 0, logType = QubicLogTypes.Burning },
-            new { scIndex = 0, logType = QubicLogTypes.ContractReserveDeduction }
-        };
-
-        string json;
-        if (_lastProcessedLogId > 0)
-        {
-            var subscribeMessage = new
-            {
-                action = "subscribe",
-                subscriptions,
-                lastLogId = _lastProcessedLogId
-            };
-            json = JsonSerializer.Serialize(subscribeMessage);
-            _log.Information("Sending subscription (epoch: {Epoch}, lastLogId: {LastLogId})...",
-                _currentEpoch, _lastProcessedLogId);
-        }
-        else
-        {
-            var subscribeMessage = new
-            {
-                action = "subscribe",
-                subscriptions,
-                lastLogId = 0 // set to zero to start fresh
-            };
-            json = JsonSerializer.Serialize(subscribeMessage);
-            _log.Information("Sending subscription (no lastLogId - starting fresh)...");
-        }
-
-        var bytes = Encoding.UTF8.GetBytes(json);
-        await _webSocket!.SendAsync(
-            new ArraySegment<byte>(bytes),
-            WebSocketMessageType.Text,
-            true,
-            cancellationToken);
-
-        _log.Information("Subscription sent successfully");
     }
 
     private async Task ProcessMessageAsync(string message)

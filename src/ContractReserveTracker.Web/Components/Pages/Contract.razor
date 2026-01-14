@@ -82,10 +82,24 @@
             </div>
         </div>
 
-        <!-- Chart Section -->
+        <!-- Reserve Timeline Chart -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <strong>Reserve Over Time</strong>
+                <div>
+                    <span class="badge me-2" style="background-color: #00ff88;">Burns (+)</span>
+                    <span class="badge" style="background-color: #ff4466;">Deductions (-)</span>
+                </div>
+            </div>
+            <div class="card-body">
+                <canvas id="reserveTimelineChart" style="height: 350px; width: 100%;"></canvas>
+            </div>
+        </div>
+
+        <!-- Epoch Summary Chart -->
         <div class="card mb-4">
             <div class="card-header">
-                <strong>Burns & Deductions Over Time</strong>
+                <strong>Burns & Deductions by Epoch</strong>
             </div>
             <div class="card-body">
                 <canvas id="reserveChart" style="height: 300px; width: 100%;"></canvas>
@@ -185,11 +199,13 @@
     private List<BurnEvent> _burns = new();
     private List<DeductEvent> _deducts = new();
     private List<(int Epoch, long TotalBurned, long TotalDeducted)> _epochData = new();
+    private List<ReserveHistoryPoint> _reserveHistory = new();
     private bool _loading = true;
     private string? _error;
     private string _contractName = "";
     private HubConnection? _hubConnection;
     private bool _chartRendered;
+    private bool _timelineChartRendered;
 
     protected override async Task OnInitializedAsync()
     {
@@ -200,10 +216,26 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!_loading && _snapshot != null && !_chartRendered && _epochData.Count > 0)
+        try
         {
-            _chartRendered = true;
-            await RenderChartAsync();
+            if (!_loading && _snapshot != null)
+            {
+                if (!_timelineChartRendered && _reserveHistory.Count > 0)
+                {
+                    _timelineChartRendered = true;
+                    await RenderTimelineChartAsync();
+                }
+
+                if (!_chartRendered && _epochData.Count > 0)
+                {
+                    _chartRendered = true;
+                    await RenderChartAsync();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in OnAfterRenderAsync: {ex.Message}");
         }
     }
 
@@ -217,6 +249,7 @@
             _burns = await ReserveService.GetRecentBurnEventsAsync(ContractIndex, limit: 100);
             _deducts = await ReserveService.GetRecentDeductEventsAsync(ContractIndex, limit: 100);
             _epochData = await ReserveService.GetEpochSummaryAsync(ContractIndex);
+            _reserveHistory = await ReserveService.GetReserveHistoryAsync(ContractIndex, limit: 500);
         }
         catch (Exception ex)
         {
@@ -225,6 +258,27 @@
         finally
         {
             _loading = false;
+        }
+    }
+
+    private async Task RenderTimelineChartAsync()
+    {
+        try
+        {
+            var dataPoints = _reserveHistory.Select(h => new
+            {
+                timestamp = h.Timestamp.ToString("o"), // ISO 8601 format
+                reserve = h.Reserve,
+                eventType = h.EventType ?? "unknown",
+                amount = h.Amount,
+                epoch = h.Epoch
+            }).ToArray();
+
+            await JS.InvokeVoidAsync("renderReserveTimelineChart", "reserveTimelineChart", dataPoints);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error rendering timeline chart: {ex.Message}");
         }
     }
 
@@ -254,7 +308,9 @@
 
                 _snapshot = await ReserveService.GetReserveSnapshotAsync(ContractIndex);
                 _epochData = await ReserveService.GetEpochSummaryAsync(ContractIndex);
+                _reserveHistory = await ReserveService.GetReserveHistoryAsync(ContractIndex, limit: 500);
                 _chartRendered = false;
+                _timelineChartRendered = false;
                 await InvokeAsync(StateHasChanged);
             }
         });
@@ -269,7 +325,9 @@
 
                 _snapshot = await ReserveService.GetReserveSnapshotAsync(ContractIndex);
                 _epochData = await ReserveService.GetEpochSummaryAsync(ContractIndex);
+                _reserveHistory = await ReserveService.GetReserveHistoryAsync(ContractIndex, limit: 500);
                 _chartRendered = false;
+                _timelineChartRendered = false;
                 await InvokeAsync(StateHasChanged);
             }
         });

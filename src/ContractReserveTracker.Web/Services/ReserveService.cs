@@ -19,11 +19,27 @@ public class ReserveService
     }
 
     /// <summary>
+    /// Get the latest epoch from all events
+    /// </summary>
+    public async Task<int> GetLatestEpochAsync()
+    {
+        await using var db = await _dbContextFactory.CreateDbContextAsync();
+
+        var latestBurnEpoch = await db.BurnEvents.MaxAsync(e => (int?)e.Epoch) ?? 0;
+        var latestDeductEpoch = await db.DeductEvents.MaxAsync(e => (int?)e.Epoch) ?? 0;
+
+        return Math.Max(latestBurnEpoch, latestDeductEpoch);
+    }
+
+    /// <summary>
     /// Get reserve snapshots for all contracts
     /// </summary>
     public async Task<List<ReserveSnapshot>> GetAllReserveSnapshotsAsync()
     {
         await using var db = await _dbContextFactory.CreateDbContextAsync();
+
+        // Get the global latest epoch
+        var latestEpoch = await GetLatestEpochAsync();
 
         // Get all unique contract indices from both tables
         var burnContracts = await db.BurnEvents
@@ -42,7 +58,7 @@ public class ReserveService
 
         foreach (var contractIndex in allContracts)
         {
-            var snapshot = await GetReserveSnapshotAsync(contractIndex);
+            var snapshot = await GetReserveSnapshotAsync(contractIndex, latestEpoch);
             if (snapshot != null)
             {
                 snapshots.Add(snapshot);
@@ -55,7 +71,9 @@ public class ReserveService
     /// <summary>
     /// Get reserve snapshot for a specific contract
     /// </summary>
-    public async Task<ReserveSnapshot?> GetReserveSnapshotAsync(int contractIndex)
+    /// <param name="contractIndex">The contract index</param>
+    /// <param name="targetEpoch">Optional epoch for calculating epoch balance. If null, uses latest epoch from this contract's events.</param>
+    public async Task<ReserveSnapshot?> GetReserveSnapshotAsync(int contractIndex, int? targetEpoch = null)
     {
         await using var db = await _dbContextFactory.CreateDbContextAsync();
 
@@ -72,12 +90,20 @@ public class ReserveService
             return null;
         }
 
-        // Determine current epoch from the most recent event
-        var latestBurnEpoch = burns.Any() ? burns.Max(b => b.Epoch) : 0;
-        var latestDeductEpoch = deducts.Any() ? deducts.Max(d => d.Epoch) : 0;
-        var currentEpoch = Math.Max(latestBurnEpoch, latestDeductEpoch);
+        // Determine current epoch - use target epoch if provided, otherwise from this contract's events
+        int currentEpoch;
+        if (targetEpoch.HasValue)
+        {
+            currentEpoch = targetEpoch.Value;
+        }
+        else
+        {
+            var latestBurnEpoch = burns.Any() ? burns.Max(b => b.Epoch) : 0;
+            var latestDeductEpoch = deducts.Any() ? deducts.Max(d => d.Epoch) : 0;
+            currentEpoch = Math.Max(latestBurnEpoch, latestDeductEpoch);
+        }
 
-        // Calculate epoch-specific totals
+        // Calculate epoch-specific totals for the target epoch
         var epochBurned = burns.Where(b => b.Epoch == currentEpoch).Sum(b => b.Amount);
         var epochDeducted = deducts.Where(d => d.Epoch == currentEpoch).Sum(d => d.DeductedAmount);
 
@@ -154,6 +180,89 @@ public class ReserveService
             .OrderByDescending(e => e.Tick)
             .Take(limit)
             .ToListAsync();
+    }
+
+    /// <summary>
+    /// Get reserve history for a contract - each burn/deduct event with the running reserve total.
+    /// Returns events ordered by tick (chronological order).
+    /// </summary>
+    public async Task<List<ReserveHistoryPoint>> GetReserveHistoryAsync(int contractIndex, int limit = 500)
+    {
+        await using var db = await _dbContextFactory.CreateDbContextAsync();
+
+        var burns = await db.BurnEvents
+            .Where(e => e.ContractIndex == contractIndex)
+            .OrderBy(e => e.Tick)
+            .ToListAsync();
+
+        var deducts = await db.DeductEvents
+            .Where(e => e.ContractIndex == contractIndex)
+            .OrderBy(e => e.Tick)
+            .ToListAsync();
+
+        // Combine and sort all events by tick
+        var allEvents = new List<ReserveHistoryPoint>();
+
+        foreach (var burn in burns)
+        {
+            allEvents.Add(new ReserveHistoryPoint
+            {
+                Tick = burn.Tick,
+                Timestamp = burn.Timestamp,
+                Epoch = burn.Epoch,
+                EventType = "burn",
+                Amount = burn.Amount,
+                Reserve = 0 // Will calculate below
+            });
+        }
+
+        foreach (var deduct in deducts)
+        {
+            allEvents.Add(new ReserveHistoryPoint
+            {
+                Tick = deduct.Tick,
+                Timestamp = deduct.Timestamp,
+                Epoch = deduct.Epoch,
+                EventType = "deduct",
+                Amount = -deduct.DeductedAmount,
+                Reserve = deduct.RemainingAmount // Deduct events have the remaining amount
+            });
+        }
+
+        // Sort by tick
+        allEvents = allEvents.OrderBy(e => e.Tick).ToList();
+
+        // Calculate running reserve for burn events
+        // We know the reserve at each deduct event (RemainingAmount)
+        // Work backwards and forwards to fill in burn event reserves
+        long runningReserve = 0;
+
+        for (int i = 0; i < allEvents.Count; i++)
+        {
+            var evt = allEvents[i];
+            if (evt.EventType == "deduct")
+            {
+                // Deduct events already have the correct reserve (remaining amount after deduction)
+                runningReserve = evt.Reserve;
+            }
+            else
+            {
+                // Burn event - add to running reserve
+                runningReserve += evt.Amount;
+                evt.Reserve = runningReserve;
+            }
+        }
+
+        // If we only have burns (no deducts to anchor), start from 0
+        // The calculation above handles this correctly
+
+        // Limit results if needed
+        if (allEvents.Count > limit)
+        {
+            allEvents = allEvents.TakeLast(limit).ToList();
+        }
+
+        return allEvents;
     }
 
     /// <summary>
