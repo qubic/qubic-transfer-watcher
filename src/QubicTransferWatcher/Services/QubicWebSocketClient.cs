@@ -52,14 +52,17 @@ public class QubicLogWatcher : IAsyncDisposable
                 var options = new LogSubscriptionOptions
                 {
                     LogTypes = new List<int> { QubicLogTypes.QuTransfer, QubicLogTypes.Burning },
-                    StartLogId = _lastProcessedLogId >= 0 ? _lastProcessedLogId + 1 : 0
                 };
+
+                // Only set startLogId if we have a saved position; otherwise let server start from current
+                if (_lastProcessedLogId >= 0)
+                    options.StartLogId = _lastProcessedLogId + 1;
 
                 if (_currentEpoch > 0)
                     options.StartEpoch = (uint)_currentEpoch;
 
                 _log.Information("Subscribing to logs (startLogId: {StartLogId}, epoch: {Epoch})...",
-                    options.StartLogId, options.StartEpoch?.ToString() ?? "latest");
+                    options.StartLogId?.ToString() ?? "latest", options.StartEpoch?.ToString() ?? "latest");
 
                 var subscription = await _bobClient.SubscribeLogsAsync(options, cancellationToken);
 
