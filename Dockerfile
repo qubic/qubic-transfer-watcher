@@ -15,10 +15,11 @@ WORKDIR /app
 COPY --from=build /app/publish .
 
 # Environment variables (override at runtime)
-ENV QUBIC_WS_URL=wss://bob.qubic.li/ws/logs
-ENV DISCORD_WEBHOOK_URL=
-ENV BUNDLE_JSON_URL=https://static.qubic.org/v1/general/data/bundle.json
-ENV MIN_TRANSFER_AMOUNT=1000000
-ENV RECONNECT_DELAY_SECONDS=5
+# Use __ separator for nested/array config, e.g. BobNodes__0, BobNodes__1
+ENV BobNodes__0=https://bobnet.qubic.li
+ENV DiscordWebhookUrl=
+ENV BundleJsonUrl=https://static.qubic.org/v1/general/data/bundle.json
+ENV MinTransferAmount=1000000
+ENV ReconnectDelaySeconds=5
 
 ENTRYPOINT ["dotnet", "QubicTransferWatcher.dll"]

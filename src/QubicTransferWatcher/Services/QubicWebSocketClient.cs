@@ -12,7 +12,8 @@ namespace QubicTransferWatcher.Services;
 public class QubicLogWatcher : IAsyncDisposable
 {
     private readonly ILogger _log = Log.ForContext<QubicLogWatcher>();
-    private readonly BobWebSocketClient _bobClient;
+    private readonly BobWebSocketOptions _bobOptions;
+    private BobWebSocketClient _bobClient;
     private readonly EventProcessor _eventProcessor;
     private readonly string _logIdFilePath;
     private readonly string _tickFilePath;
@@ -26,6 +27,7 @@ public class QubicLogWatcher : IAsyncDisposable
         EventProcessor eventProcessor,
         string? dataDir = null)
     {
+        _bobOptions = bobOptions;
         _bobClient = new BobWebSocketClient(bobOptions);
         _eventProcessor = eventProcessor;
 
@@ -40,49 +42,66 @@ public class QubicLogWatcher : IAsyncDisposable
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
-        _log.Information("Connecting to Bob...");
-        await _bobClient.ConnectAsync(cancellationToken);
-
-        var options = new LogSubscriptionOptions
+        while (!cancellationToken.IsCancellationRequested)
         {
-            LogTypes = new List<int> { QubicLogTypes.QuTransfer, QubicLogTypes.Burning },
-            StartLogId = _lastProcessedLogId >= 0 ? _lastProcessedLogId + 1 : 0
-        };
-
-        if (_currentEpoch > 0)
-            options.StartEpoch = (uint)_currentEpoch;
-
-        _log.Information("Subscribing to logs (startLogId: {StartLogId}, epoch: {Epoch})...",
-            options.StartLogId, options.StartEpoch?.ToString() ?? "latest");
-
-        var subscription = await _bobClient.SubscribeLogsAsync(options, cancellationToken);
-
-        await foreach (var notification in subscription.WithCancellation(cancellationToken))
-        {
-            if (notification.CatchUpComplete)
+            try
             {
-                _log.Information("Catch-up complete");
-                continue;
-            }
+                _log.Information("Connecting to Bob...");
+                await _bobClient.ConnectAsync(cancellationToken);
 
-            // Detect epoch change
-            if (notification.Epoch > 0 && (int)notification.Epoch != _currentEpoch && _currentEpoch > 0)
-            {
-                _log.Information("Epoch change detected: {OldEpoch} -> {NewEpoch}. Resetting logId from {OldLogId} to -1",
-                    _currentEpoch, notification.Epoch, _lastProcessedLogId);
-                _currentEpoch = (int)notification.Epoch;
-                _lastProcessedLogId = -1;
-                _lastSeenTick = 0;
-                SaveProgress();
-            }
-            else if (_currentEpoch == 0 && notification.Epoch > 0)
-            {
-                _currentEpoch = (int)notification.Epoch;
-                SaveEpoch();
-            }
+                var options = new LogSubscriptionOptions
+                {
+                    LogTypes = new List<int> { QubicLogTypes.QuTransfer, QubicLogTypes.Burning },
+                    StartLogId = _lastProcessedLogId >= 0 ? _lastProcessedLogId + 1 : 0
+                };
 
-            await _eventProcessor.ProcessNotificationAsync(notification);
-            UpdateProgress(notification.LogId, notification.Tick, (int)notification.Epoch);
+                if (_currentEpoch > 0)
+                    options.StartEpoch = (uint)_currentEpoch;
+
+                _log.Information("Subscribing to logs (startLogId: {StartLogId}, epoch: {Epoch})...",
+                    options.StartLogId, options.StartEpoch?.ToString() ?? "latest");
+
+                var subscription = await _bobClient.SubscribeLogsAsync(options, cancellationToken);
+
+                await foreach (var notification in subscription.WithCancellation(cancellationToken))
+                {
+                    if (notification.CatchUpComplete)
+                    {
+                        _log.Information("Catch-up complete");
+                        continue;
+                    }
+
+                    // Detect epoch change
+                    if (notification.Epoch > 0 && (int)notification.Epoch != _currentEpoch && _currentEpoch > 0)
+                    {
+                        _log.Information("Epoch change detected: {OldEpoch} -> {NewEpoch}. Resetting logId from {OldLogId} to -1",
+                            _currentEpoch, notification.Epoch, _lastProcessedLogId);
+                        _currentEpoch = (int)notification.Epoch;
+                        _lastProcessedLogId = -1;
+                        _lastSeenTick = 0;
+                        SaveProgress();
+                    }
+                    else if (_currentEpoch == 0 && notification.Epoch > 0)
+                    {
+                        _currentEpoch = (int)notification.Epoch;
+                        SaveEpoch();
+                    }
+
+                    await _eventProcessor.ProcessNotificationAsync(notification);
+                    UpdateProgress(notification.LogId, notification.Tick, (int)notification.Epoch);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _log.Error(ex, "Connection error, retrying in 5 seconds...");
+                await _bobClient.DisposeAsync();
+                _bobClient = new BobWebSocketClient(_bobOptions);
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            }
         }
     }
 
