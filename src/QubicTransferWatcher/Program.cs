@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using Qubic.Bob;
 using QubicTransferWatcher.Models;
 using QubicTransferWatcher.Services;
 using Serilog;
@@ -93,10 +94,20 @@ class Program
                 discordService,
                 settings.MinTransferAmount);
 
-            var webSocketClient = new QubicWebSocketClient(
-                settings.WebSocketUrls,
-                eventProcessor,
-                settings.ReconnectDelaySeconds);
+            var bobOptions = new BobWebSocketOptions
+            {
+                Nodes = settings.BobNodes.ToArray(),
+                ReconnectDelay = TimeSpan.FromSeconds(settings.ReconnectDelaySeconds),
+                OnConnectionEvent = evt =>
+                {
+                    if (evt.Exception != null)
+                        Log.Warning(evt.Exception, "Bob: {Message}", evt.Message);
+                    else
+                        Log.Information("Bob: [{EventType}] {Message}", evt.Type, evt.Message);
+                }
+            };
+
+            await using var watcher = new QubicLogWatcher(bobOptions, eventProcessor);
 
             // Setup graceful shutdown
             var cts = new CancellationTokenSource();
@@ -119,8 +130,7 @@ class Program
 
             // Print configuration
             Log.Information("Configuration:");
-            Log.Information("  WebSocket URLs: {WebSocketUrls}", string.Join(", ", settings.WebSocketUrls));
-            Log.Information("  Max Tick Delay: {MaxTickDelay}", settings.MaxTickDelay);
+            Log.Information("  Bob Nodes: {BobNodes}", string.Join(", ", settings.BobNodes));
             Log.Information("  Min Transfer Amount: {MinAmount} QUBIC", PriceService.FormatQubicAmount(settings.MinTransferAmount));
             Log.Information("  Discord Webhook: {DiscordStatus}", string.IsNullOrEmpty(settings.DiscordWebhookUrl) ? "Not configured" : "Configured");
             Log.Information("  Seq URL: {SeqUrl}", settings.SeqUrl);
@@ -129,15 +139,11 @@ class Program
             // Start monitoring
             try
             {
-                await webSocketClient.StartAsync(cts.Token);
+                await watcher.RunAsync(cts.Token);
             }
             catch (OperationCanceledException)
             {
                 // Normal shutdown
-            }
-            finally
-            {
-                webSocketClient.Dispose();
             }
 
             Log.Information("Goodbye!");

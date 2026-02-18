@@ -3,15 +3,9 @@ namespace QubicTransferWatcher.Models;
 public class AppSettings
 {
     /// <summary>
-    /// List of WebSocket URLs to try in order. Falls back to next URL on connection failure or tick delay.
+    /// Bob node base URLs (e.g., "https://bob.qubic.li"). BobWebSocketClient derives HTTP and WS endpoints from these.
     /// </summary>
-    public List<string> WebSocketUrls { get; set; } = new();
-
-    /// <summary>
-    /// Maximum allowed tick delay before switching to next WebSocket URL.
-    /// If server's currentVerifiedTick is more than this many ticks behind the latest known tick, switch servers.
-    /// </summary>
-    public int MaxTickDelay { get; set; } = 10;
+    public List<string> BobNodes { get; set; } = new();
 
     public string DiscordWebhookUrl { get; set; } = "";
     public string BundleJsonUrl { get; set; } = "https://static.qubic.org/v1/general/data/bundle.json";

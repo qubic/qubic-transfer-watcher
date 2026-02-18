@@ -4,6 +4,7 @@ using ContractReserveTracker.Shared.Services;
 using ContractReserveTracker.Web.Hubs;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Qubic.Bob;
 using Serilog;
 
 namespace ContractReserveTracker.Web.Services.Collector;
@@ -15,7 +16,7 @@ public class CollectorHostedService : BackgroundService
     private readonly IDbContextFactory<ReserveDbContext> _dbContextFactory;
     private readonly IContractInfoService _contractInfoService;
     private readonly IHubContext<ReserveHub, IReserveHubClient> _hubContext;
-    private QubicWebSocketClient? _webSocketClient;
+    private QubicLogCollector? _collector;
     private DataCleanupService? _dataCleanupService;
 
     public CollectorHostedService(
@@ -32,10 +33,10 @@ public class CollectorHostedService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var webSocketUrls = _configuration.GetSection("Collector:WebSocketUrls").Get<List<string>>();
-        if (webSocketUrls == null || webSocketUrls.Count == 0)
+        var bobNodes = _configuration.GetSection("Collector:BobNodes").Get<List<string>>();
+        if (bobNodes == null || bobNodes.Count == 0)
         {
-            _log.Warning("No WebSocket URLs configured. Collector will not run.");
+            _log.Warning("No Bob nodes configured. Collector will not run.");
             return;
         }
 
@@ -46,7 +47,7 @@ public class CollectorHostedService : BackgroundService
         _log.Information("   Contract Reserve Tracker - Collector");
         _log.Information("========================================");
         _log.Information("Configuration:");
-        _log.Information("  WebSocket URLs: {WebSocketUrls}", string.Join(", ", webSocketUrls));
+        _log.Information("  Bob Nodes: {BobNodes}", string.Join(", ", bobNodes));
         _log.Information("  Epochs to keep: {EpochsToKeep}", epochsToKeep);
 
         // Initialize data cleanup service
@@ -55,16 +56,24 @@ public class CollectorHostedService : BackgroundService
         // Initialize event processor with hub context for real-time updates
         var eventProcessor = new EventProcessor(_dbContextFactory, _contractInfoService, _hubContext);
 
-        // Initialize WebSocket client
-        _webSocketClient = new QubicWebSocketClient(
-            webSocketUrls,
-            eventProcessor,
-            _dbContextFactory,
-            reconnectDelaySeconds);
+        var bobOptions = new BobWebSocketOptions
+        {
+            Nodes = bobNodes.ToArray(),
+            ReconnectDelay = TimeSpan.FromSeconds(reconnectDelaySeconds),
+            OnConnectionEvent = evt =>
+            {
+                if (evt.Exception != null)
+                    _log.Warning(evt.Exception, "Bob: {Message}", evt.Message);
+                else
+                    _log.Information("Bob: [{EventType}] {Message}", evt.Type, evt.Message);
+            }
+        };
+
+        _collector = new QubicLogCollector(bobOptions, eventProcessor, _dbContextFactory);
 
         try
         {
-            await _webSocketClient.StartAsync(stoppingToken);
+            await _collector.RunAsync(stoppingToken);
         }
         catch (OperationCanceledException)
         {
@@ -76,7 +85,7 @@ public class CollectorHostedService : BackgroundService
         }
         finally
         {
-            _webSocketClient.Dispose();
+            await _collector.DisposeAsync();
         }
 
         _log.Information("Collector stopped");
@@ -85,9 +94,9 @@ public class CollectorHostedService : BackgroundService
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         _log.Information("Stopping collector...");
-        if (_webSocketClient != null)
+        if (_collector != null)
         {
-            await _webSocketClient.StopAsync();
+            await _collector.DisposeAsync();
         }
         await base.StopAsync(cancellationToken);
     }

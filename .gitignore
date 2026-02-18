@@ -8,6 +8,7 @@ publish/
 .vs/
 .vscode/
 .idea/
+.claude/
 *.user
 *.suo
 *.userosscache

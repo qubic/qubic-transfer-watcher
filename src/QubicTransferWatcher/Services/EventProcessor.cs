@@ -1,11 +1,12 @@
 using System.Text.Json;
+using Qubic.Bob.Models;
 using QubicTransferWatcher.Models;
 using Serilog;
 
 namespace QubicTransferWatcher.Services;
 
 /// <summary>
-/// Processes incoming WebSocket messages and filters events for notification
+/// Processes log notifications and filters events for Discord notification.
 /// </summary>
 public class EventProcessor
 {
@@ -13,7 +14,6 @@ public class EventProcessor
     private readonly AddressLabelService _addressLabelService;
     private readonly DiscordService _discordService;
     private readonly long _minTransferAmount;
-    private long _lastProcessedLogId = -1;
 
     public EventProcessor(
         AddressLabelService addressLabelService,
@@ -26,42 +26,32 @@ public class EventProcessor
     }
 
     /// <summary>
-    /// Update the last processed logId (called by WebSocketClient when logId is persisted)
+    /// Process a typed log notification from BobWebSocketClient.
     /// </summary>
-    public void SetLastProcessedLogId(long logId)
+    public async Task ProcessNotificationAsync(LogNotification notification)
     {
-        _lastProcessedLogId = logId;
-    }
-
-    /// <summary>
-    /// Process a WebSocket message and return the logId and tick (for tracking)
-    /// </summary>
-    /// <returns>Tuple of (logId, tick) from the message, or (0, 0) if not found</returns>
-    public async Task<(long logId, long tick)> ProcessMessageAsync(string message)
-    {
-        long logId = 0;
-        long tick = 0;
-
         try
         {
-            var (transfer, messageLogId, messageTick) = ParseMessage(message);
-            logId = messageLogId;
-            tick = messageTick;
+            if (notification.Body is null)
+                return;
+
+            var timestamp = ParseTimestamp(notification.Timestamp);
+            var txHash = notification.TxHash ?? notification.LogDigest ?? "";
+
+            TransferEvent? transfer = null;
+
+            if (notification.LogType == QubicLogTypes.QuTransfer)
+            {
+                transfer = ParseTransferBody(notification.Body.Value, txHash, notification.Tick, timestamp);
+            }
+            else if (notification.LogType == QubicLogTypes.Burning)
+            {
+                transfer = ParseBurnBody(notification.Body.Value, txHash, notification.Tick, timestamp);
+            }
 
             if (transfer == null)
-            {
-                return (logId, tick);
-            }
+                return;
 
-            // Ignore events we've already processed
-            if (logId > 0 && logId <= _lastProcessedLogId)
-            {
-                _log.Debug("Ignoring already processed event logId {LogId} (last: {LastLogId})",
-                    logId, _lastProcessedLogId);
-                return (logId, tick);
-            }
-
-            // Apply filtering rules
             if (ShouldNotify(transfer))
             {
                 _log.Information("Event matched: {EventType} - {Amount} QUBIC (tick: {Tick})",
@@ -73,177 +63,62 @@ public class EventProcessor
         }
         catch (Exception ex)
         {
-            _log.Error(ex, "Error processing message");
+            _log.Error(ex, "Error processing notification");
         }
-
-        return (logId, tick);
     }
 
-    private (TransferEvent? transfer, long logId, long tick) ParseMessage(string message)
+    private static DateTime ParseTimestamp(JsonElement? timestampElement)
     {
-        try
+        if (!timestampElement.HasValue)
+            return DateTime.UtcNow;
+
+        if (timestampElement.Value.ValueKind == JsonValueKind.String)
         {
-            using var doc = JsonDocument.Parse(message);
-            var root = doc.RootElement;
-
-            long logId = 0;
-            long tick = 0;
-
-            // Check if this is a JSON-RPC 2.0 message
-            if (!root.TryGetProperty("jsonrpc", out var jsonRpcElement) ||
-                jsonRpcElement.GetString() != "2.0")
+            var timestampStr = timestampElement.Value.GetString();
+            if (!string.IsNullOrEmpty(timestampStr) &&
+                DateTime.TryParseExact(timestampStr, "yy-MM-dd HH:mm:ss",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeUniversal, out var parsedTimestamp))
             {
-                return (null, logId, tick);
+                return DateTime.SpecifyKind(parsedTimestamp, DateTimeKind.Utc);
             }
-
-            // Handle subscription confirmation (has "id" and "result")
-            if (root.TryGetProperty("id", out _) && root.TryGetProperty("result", out var resultElement))
-            {
-                // Result can be a string (subscription ID) or an object
-                if (resultElement.ValueKind == JsonValueKind.String)
-                {
-                    _log.Information("Subscription confirmed with ID: {SubscriptionId}", resultElement.GetString());
-                }
-                else if (resultElement.TryGetProperty("subscription", out var subElement))
-                {
-                    _log.Information("Subscription confirmed with ID: {SubscriptionId}", subElement.GetString());
-                }
-                return (null, logId, tick);
-            }
-
-            // Handle subscription notifications (method = "qubic_subscription")
-            if (!root.TryGetProperty("method", out var methodElement) ||
-                methodElement.GetString() != "qubic_subscription")
-            {
-                return (null, logId, tick);
-            }
-
-            // Get params object
-            if (!root.TryGetProperty("params", out var paramsElement))
-            {
-                return (null, logId, tick);
-            }
-
-            // Get the result (single log entry, not array)
-            if (!paramsElement.TryGetProperty("result", out var logEntry))
-            {
-                return (null, logId, tick);
-            }
-
-            // Extract logId from log entry
-            if (logEntry.TryGetProperty("logId", out var logIdElement))
-            {
-                logId = logIdElement.GetInt64();
-            }
-
-            // Get the log type (field is "type" in new format)
-            if (!logEntry.TryGetProperty("type", out var logTypeElement))
-            {
-                return (null, logId, tick);
-            }
-
-            var logType = logTypeElement.GetInt32();
-
-            // Extract tick
-            if (logEntry.TryGetProperty("tick", out var tickElement))
-            {
-                tick = tickElement.GetInt64();
-            }
-
-            // Extract timestamp (format: "25-12-18 07:20:52")
-            DateTime? timestamp = null;
-            if (logEntry.TryGetProperty("timestamp", out var timestampElement))
-            {
-                var timestampStr = timestampElement.GetString();
-                if (!string.IsNullOrEmpty(timestampStr) &&
-                    DateTime.TryParseExact(timestampStr, "yy-MM-dd HH:mm:ss",
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        System.Globalization.DateTimeStyles.AssumeUniversal, out var parsedTimestamp))
-                {
-                    timestamp = DateTime.SpecifyKind(parsedTimestamp, DateTimeKind.Utc);
-                }
-            }
-
-            // Get body - in new format it's at root level of log entry
-            if (!logEntry.TryGetProperty("body", out var bodyElement))
-            {
-                return (null, logId, tick);
-            }
-
-            // Get transaction ID - prefer txHash, fallback to logDigest
-            string txHash = "";
-            if (logEntry.TryGetProperty("txHash", out var txHashElement))
-            {
-                txHash = txHashElement.GetString() ?? "";
-            }
-            else if (logEntry.TryGetProperty("logDigest", out var digestElement))
-            {
-                txHash = digestElement.GetString() ?? "";
-            }
-
-            TransferEvent? transfer = null;
-
-            if (logType == QubicLogTypes.QuTransfer)
-            {
-                // QU_TRANSFER: { "from": "...", "to": "...", "amount": ... }
-                transfer = ParseTransferBody(bodyElement, txHash, tick, timestamp);
-            }
-            else if (logType == QubicLogTypes.Burning)
-            {
-                // BURNING: { "publicKey": "...", "amount": ..., "contractIndexBurnedFor": ... }
-                transfer = ParseBurnBody(bodyElement, txHash, tick, timestamp);
-            }
-
-            return (transfer, logId, tick);
         }
-        catch (JsonException ex)
+        else if (timestampElement.Value.ValueKind == JsonValueKind.Number)
         {
-            _log.Debug("Failed to parse message as JSON: {Error}", ex.Message);
-            return (null, 0, 0);
+            var unixSeconds = timestampElement.Value.GetInt64();
+            return DateTimeOffset.FromUnixTimeSeconds(unixSeconds).UtcDateTime;
         }
+
+        return DateTime.UtcNow;
     }
 
-    private TransferEvent? ParseTransferBody(JsonElement body, string txHash, long tick, DateTime? timestamp)
+    private TransferEvent? ParseTransferBody(JsonElement body, string txHash, uint tick, DateTime timestamp)
     {
         var transfer = new TransferEvent
         {
             TxHash = txHash,
             Tick = tick,
             IsBurn = false,
-            Timestamp = timestamp ?? DateTime.UtcNow
+            Timestamp = timestamp
         };
 
-        // Get from address
         if (body.TryGetProperty("from", out var fromElement))
-        {
             transfer.FromAddress = fromElement.GetString() ?? "";
-        }
 
-        // Get to address
         if (body.TryGetProperty("to", out var toElement))
-        {
             transfer.ToAddress = toElement.GetString() ?? "";
-        }
 
-        // Get amount
         if (body.TryGetProperty("amount", out var amountElement))
-        {
             transfer.Amount = amountElement.GetInt64();
-        }
 
-        // Validate required fields
         if (string.IsNullOrEmpty(transfer.FromAddress) || transfer.Amount <= 0)
-        {
             return null;
-        }
 
-        // Check if destination is burn address
         transfer.IsBurn = _addressLabelService.IsBurnAddress(transfer.ToAddress);
-
         return transfer;
     }
 
-    private TransferEvent? ParseBurnBody(JsonElement body, string txHash, long tick, DateTime? timestamp)
+    private TransferEvent? ParseBurnBody(JsonElement body, string txHash, uint tick, DateTime timestamp)
     {
         var transfer = new TransferEvent
         {
@@ -251,26 +126,17 @@ public class EventProcessor
             Tick = tick,
             IsBurn = true,
             ToAddress = AddressLabelService.BurnAddress,
-            Timestamp = timestamp ?? DateTime.UtcNow
+            Timestamp = timestamp
         };
 
-        // Get publicKey (the address that burned)
         if (body.TryGetProperty("publicKey", out var publicKeyElement))
-        {
             transfer.FromAddress = publicKeyElement.GetString() ?? "";
-        }
 
-        // Get amount
         if (body.TryGetProperty("amount", out var amountElement))
-        {
             transfer.Amount = amountElement.GetInt64();
-        }
 
-        // Validate required fields
         if (string.IsNullOrEmpty(transfer.FromAddress) || transfer.Amount <= 0)
-        {
             return null;
-        }
 
         return transfer;
     }
@@ -279,15 +145,11 @@ public class EventProcessor
     {
         // Ignore 1M transfers to Qutil burn address (fee payments)
         if (transfer.ToAddress == AddressLabelService.BurnAddressQutil && transfer.Amount == 1_000_000)
-        {
             return false;
-        }
 
         // Always notify for burn events
         if (transfer.IsBurn)
-        {
             return true;
-        }
 
         // For regular transfers, only notify if amount exceeds threshold
         return transfer.Amount >= _minTransferAmount;
