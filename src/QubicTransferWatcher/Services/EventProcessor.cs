@@ -14,15 +14,18 @@ public class EventProcessor
     private readonly AddressLabelService _addressLabelService;
     private readonly DiscordService _discordService;
     private readonly long _minTransferAmount;
+    private readonly long _minBurnAmount;
 
     public EventProcessor(
         AddressLabelService addressLabelService,
         DiscordService discordService,
-        long minTransferAmount)
+        long minTransferAmount,
+        long minBurnAmount = 0)
     {
         _addressLabelService = addressLabelService;
         _discordService = discordService;
         _minTransferAmount = minTransferAmount;
+        _minBurnAmount = minBurnAmount;
     }
 
     /// <summary>
@@ -147,9 +150,9 @@ public class EventProcessor
         if (transfer.ToAddress == AddressLabelService.BurnAddressQutil && transfer.Amount == 1_000_000)
             return false;
 
-        // Always notify for burn events
+        // For burn events, check burn threshold
         if (transfer.IsBurn)
-            return true;
+            return transfer.Amount >= _minBurnAmount;
 
         // For regular transfers, only notify if amount exceeds threshold
         return transfer.Amount >= _minTransferAmount;

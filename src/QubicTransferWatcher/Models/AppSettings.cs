@@ -10,6 +10,7 @@ public class AppSettings
     public string DiscordWebhookUrl { get; set; } = "";
     public string BundleJsonUrl { get; set; } = "https://static.qubic.org/v1/general/data/bundle.json";
     public long MinTransferAmount { get; set; } = 2_000_000_000;
+    public long MinBurnAmount { get; set; } = 50;
     public int ReconnectDelaySeconds { get; set; } = 5;
     public string SeqUrl { get; set; } = "http://localhost:5341";
     public string? SeqApiKey { get; set; }

@@ -22,6 +22,7 @@ ENV BobNodes__0=https://bobnet.qubic.li
 ENV DiscordWebhookUrl=
 ENV BundleJsonUrl=https://static.qubic.org/v1/general/data/bundle.json
 ENV MinTransferAmount=1000000
+ENV MinBurnAmount=50
 ENV ReconnectDelaySeconds=5
 
 ENTRYPOINT ["dotnet", "QubicTransferWatcher.dll"]

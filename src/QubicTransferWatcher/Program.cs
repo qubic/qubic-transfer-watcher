@@ -92,7 +92,8 @@ class Program
             var eventProcessor = new EventProcessor(
                 addressLabelService,
                 discordService,
-                settings.MinTransferAmount);
+                settings.MinTransferAmount,
+                settings.MinBurnAmount);
 
             var bobOptions = new BobWebSocketOptions
             {
@@ -132,6 +133,7 @@ class Program
             Log.Information("Configuration:");
             Log.Information("  Bob Nodes: {BobNodes}", string.Join(", ", settings.BobNodes));
             Log.Information("  Min Transfer Amount: {MinAmount} QUBIC", PriceService.FormatQubicAmount(settings.MinTransferAmount));
+            Log.Information("  Min Burn Amount: {MinBurnAmount} QUBIC", PriceService.FormatQubicAmount(settings.MinBurnAmount));
             Log.Information("  Discord Webhook: {DiscordStatus}", string.IsNullOrEmpty(settings.DiscordWebhookUrl) ? "Not configured" : "Configured");
             Log.Information("  Seq URL: {SeqUrl}", settings.SeqUrl);
             Log.Information("Press Ctrl+C to stop...");
