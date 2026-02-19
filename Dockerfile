@@ -2,13 +2,14 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
-# Copy csproj and restore as distinct layers
+# Copy local NuGet packages and csproj, then restore
+COPY nuget-local/ /nuget-local/
 COPY src/QubicTransferWatcher/QubicTransferWatcher.csproj src/QubicTransferWatcher/
-RUN dotnet restore src/QubicTransferWatcher/QubicTransferWatcher.csproj
+RUN dotnet restore src/QubicTransferWatcher/QubicTransferWatcher.csproj --source /nuget-local --source https://api.nuget.org/v3/index.json
 
 # Copy everything and publish
 COPY . .
-RUN dotnet publish src/QubicTransferWatcher/QubicTransferWatcher.csproj -c Release -o /app/publish
+RUN dotnet publish src/QubicTransferWatcher/QubicTransferWatcher.csproj -c Release -o /app/publish --no-restore
 
 # Runtime stage
 FROM mcr.microsoft.com/dotnet/runtime:8.0
