@@ -163,6 +163,29 @@ public class DiscordService
         await Task.Delay(500);
     }
 
+    public async Task SendBurnWindowAlertAsync(BurnWindowAlert alert)
+    {
+        if (string.IsNullOrEmpty(_webhookUrl))
+            return;
+
+        try
+        {
+            var usdValue = await _priceService.CalculateUsdValue(alert.TotalAmount);
+            var qubicFormatted = PriceService.FormatQubicAmount(alert.TotalAmount);
+            var usdFormatted = PriceService.FormatNumber(usdValue);
+
+            var message = $"🔥📊 **{qubicFormatted} QUBIC** ({usdFormatted} USD) burned in the last {alert.WindowMinutes} minutes across {alert.BurnCount} burn{(alert.BurnCount != 1 ? "s" : "")}";
+            await SendWebhookMessageAsync(message);
+
+            _log.Information("Burn window alert sent: {Total} QUBIC across {Count} burns",
+                qubicFormatted, alert.BurnCount);
+        }
+        catch (Exception ex)
+        {
+            _log.Error(ex, "Error sending burn window alert");
+        }
+    }
+
     public async Task SendStartupMessageAsync()
     {
         if (string.IsNullOrEmpty(_webhookUrl))

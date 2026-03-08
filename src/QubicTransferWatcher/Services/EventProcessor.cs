@@ -15,17 +15,20 @@ public class EventProcessor
     private readonly DiscordService _discordService;
     private readonly long _minTransferAmount;
     private readonly long _minBurnAmount;
+    private readonly BurnWindowTracker? _burnWindowTracker;
 
     public EventProcessor(
         AddressLabelService addressLabelService,
         DiscordService discordService,
         long minTransferAmount,
-        long minBurnAmount = 0)
+        long minBurnAmount = 0,
+        BurnWindowTracker? burnWindowTracker = null)
     {
         _addressLabelService = addressLabelService;
         _discordService = discordService;
         _minTransferAmount = minTransferAmount;
         _minBurnAmount = minBurnAmount;
+        _burnWindowTracker = burnWindowTracker;
     }
 
     /// <summary>
@@ -62,6 +65,14 @@ public class EventProcessor
                     PriceService.FormatQubicAmount(transfer.Amount),
                     transfer.Tick);
                 await _discordService.SendTransferNotificationAsync(transfer);
+            }
+
+            // Track burns in the sliding window regardless of individual threshold
+            if (transfer.IsBurn && _burnWindowTracker != null)
+            {
+                var alert = _burnWindowTracker.RecordBurn(transfer.Timestamp, transfer.Amount);
+                if (alert != null)
+                    await _discordService.SendBurnWindowAlertAsync(alert);
             }
         }
         catch (Exception ex)
