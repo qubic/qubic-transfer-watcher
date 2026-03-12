@@ -149,18 +149,43 @@ public class DiscordService
         };
 
         var json = JsonSerializer.Serialize(payload);
-        var httpContent = new StringContent(json, Encoding.UTF8, "application/json");
 
-        var response = await _httpClient.PostAsync(_webhookUrl, httpContent);
-
-        if (!response.IsSuccessStatusCode)
+        for (var attempt = 0; attempt < 3; attempt++)
         {
-            var error = await response.Content.ReadAsStringAsync();
-            throw new Exception($"Discord webhook failed: {response.StatusCode} - {error}");
+            var httpContent = new StringContent(json, Encoding.UTF8, "application/json");
+            var response = await _httpClient.PostAsync(_webhookUrl, httpContent);
+
+            if (response.IsSuccessStatusCode)
+            {
+                // Respect Discord rate limits
+                await Task.Delay(1000);
+                return;
+            }
+
+            if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                // Parse retry_after from response, default to 2 seconds
+                var retryAfter = 2.0;
+                try
+                {
+                    using var doc = JsonDocument.Parse(error);
+                    if (doc.RootElement.TryGetProperty("retry_after", out var retryElement))
+                        retryAfter = retryElement.GetDouble();
+                }
+                catch { }
+
+                _log.Warning("Discord rate limited, retrying in {RetryAfter}s (attempt {Attempt}/3)",
+                    retryAfter, attempt + 1);
+                await Task.Delay(TimeSpan.FromSeconds(retryAfter + 0.5));
+                continue;
+            }
+
+            var errorMsg = await response.Content.ReadAsStringAsync();
+            throw new Exception($"Discord webhook failed: {response.StatusCode} - {errorMsg}");
         }
 
-        // Respect Discord rate limits
-        await Task.Delay(500);
+        _log.Warning("Discord webhook failed after 3 rate limit retries, skipping message");
     }
 
     public async Task SendBurnWindowAlertAsync(BurnWindowAlert alert)

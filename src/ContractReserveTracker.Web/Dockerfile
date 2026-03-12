@@ -5,12 +5,13 @@ EXPOSE 5000
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
-# Copy project files
+# Copy local NuGet packages and project files
+COPY ["nuget-local/", "/nuget-local/"]
 COPY ["src/ContractReserveTracker.Web/ContractReserveTracker.Web.csproj", "src/ContractReserveTracker.Web/"]
 COPY ["src/ContractReserveTracker.Shared/ContractReserveTracker.Shared.csproj", "src/ContractReserveTracker.Shared/"]
 
 # Restore dependencies
-RUN dotnet restore "src/ContractReserveTracker.Web/ContractReserveTracker.Web.csproj"
+RUN dotnet restore "src/ContractReserveTracker.Web/ContractReserveTracker.Web.csproj" --source /nuget-local --source https://api.nuget.org/v3/index.json
 
 # Copy source code
 COPY ["src/ContractReserveTracker.Web/", "src/ContractReserveTracker.Web/"]
