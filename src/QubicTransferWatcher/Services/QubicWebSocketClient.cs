@@ -49,6 +49,31 @@ public class QubicLogWatcher : IAsyncDisposable
                 _log.Information("Connecting to Bob...");
                 await _bobClient.ConnectAsync(cancellationToken);
 
+                // Check if epoch changed since last run (e.g. crashed in previous epoch)
+                try
+                {
+                    var epochInfo = await _bobClient.GetCurrentEpochAsync(cancellationToken);
+                    var currentEpoch = (int)epochInfo.Epoch;
+                    if (_currentEpoch > 0 && currentEpoch != _currentEpoch)
+                    {
+                        _log.Information("Epoch changed since last run: {OldEpoch} -> {NewEpoch}. Resetting logId from {OldLogId} to -1",
+                            _currentEpoch, currentEpoch, _lastProcessedLogId);
+                        _currentEpoch = currentEpoch;
+                        _lastProcessedLogId = -1;
+                        _lastSeenTick = 0;
+                        SaveProgress();
+                    }
+                    else if (_currentEpoch == 0 && currentEpoch > 0)
+                    {
+                        _currentEpoch = currentEpoch;
+                        SaveEpoch();
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _log.Warning(ex, "Failed to check current epoch, proceeding with saved state");
+                }
+
                 var options = new LogSubscriptionOptions
                 {
                     LogTypes = new List<int> { QubicLogTypes.QuTransfer, QubicLogTypes.Burning },
