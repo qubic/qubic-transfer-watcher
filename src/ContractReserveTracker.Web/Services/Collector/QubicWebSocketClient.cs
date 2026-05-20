@@ -86,12 +86,67 @@ public class QubicLogCollector : IAsyncDisposable
 
                 var subscription = await _bobClient.SubscribeLogsAsync(options, cancellationToken);
                 int saveCounter = 0;
+                bool inCatchUp = false;
+                DateTime catchUpStartedAt = DateTime.MinValue;
+                DateTime lastProgressLogAt = DateTime.MinValue;
+                long catchUpMatchedAtStart = 0;
 
                 await foreach (var notification in subscription.WithCancellation(cancellationToken))
                 {
+                    // Detect catch-up start (first notification with IsCatchUp set)
+                    if (notification.IsCatchUp && !inCatchUp && !notification.CatchUpComplete)
+                    {
+                        inCatchUp = true;
+                        catchUpStartedAt = DateTime.UtcNow;
+                        lastProgressLogAt = catchUpStartedAt;
+                        _log.Information(
+                            "Catch-up started (epoch={Epoch}, fromLogId={FromLogId}, total={Total})",
+                            options.StartEpoch?.ToString() ?? "?",
+                            options.StartLogId?.ToString() ?? "?",
+                            notification.Total?.ToString() ?? "?");
+                    }
+
+                    // Throttled progress logging for CatchUpProgress pings (no log body, just stats)
+                    if (notification.CatchUpProgress)
+                    {
+                        var now = DateTime.UtcNow;
+                        if ((now - lastProgressLogAt).TotalSeconds >= 5)
+                        {
+                            var elapsed = (now - catchUpStartedAt).TotalSeconds;
+                            var matched = notification.Matched ?? notification.TotalMatched ?? 0;
+                            var rate = elapsed > 0 ? (matched - catchUpMatchedAtStart) / elapsed : 0;
+                            _log.Information(
+                                "Catch-up progress: {Percent:F1}% ({Current}/{Total}), position={Position}, matched={Matched}, processed={Processed}, rate={Rate:F0}/s",
+                                notification.Percent ?? 0,
+                                notification.Current?.ToString() ?? "?",
+                                notification.Total?.ToString() ?? "?",
+                                notification.Position?.ToString() ?? "?",
+                                matched,
+                                notification.TotalProcessed?.ToString() ?? "?",
+                                rate);
+                            lastProgressLogAt = now;
+                        }
+                        continue;
+                    }
+
                     if (notification.CatchUpComplete)
                     {
-                        _log.Information("Catch-up complete");
+                        if (inCatchUp)
+                        {
+                            var elapsed = (DateTime.UtcNow - catchUpStartedAt).TotalSeconds;
+                            _log.Information(
+                                "Catch-up complete in {Elapsed:F1}s (lastLogId={LastLogId}, lastTick={LastTick}, totalMatched={Matched}, totalProcessed={Processed})",
+                                elapsed,
+                                _lastProcessedLogId,
+                                _lastSeenTick,
+                                notification.TotalMatched?.ToString() ?? "?",
+                                notification.TotalProcessed?.ToString() ?? "?");
+                        }
+                        else
+                        {
+                            _log.Information("Catch-up complete");
+                        }
+                        inCatchUp = false;
                         await SaveProgressToDbAsync();
                         continue;
                     }
@@ -124,6 +179,19 @@ public class QubicLogCollector : IAsyncDisposable
 
                     if (notification.Tick > (uint)_lastSeenTick)
                         _lastSeenTick = notification.Tick;
+
+                    // Heartbeat during catch-up when server doesn't send CatchUpProgress pings
+                    if (notification.IsCatchUp && inCatchUp)
+                    {
+                        var now = DateTime.UtcNow;
+                        if ((now - lastProgressLogAt).TotalSeconds >= 5)
+                        {
+                            _log.Information(
+                                "Catch-up in progress: logId={LogId}, tick={Tick}, epoch={Epoch}",
+                                _lastProcessedLogId, _lastSeenTick, _currentEpoch);
+                            lastProgressLogAt = now;
+                        }
+                    }
 
                     // Save progress periodically (every 100 messages)
                     if (++saveCounter >= 100)
